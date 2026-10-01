@@ -1,13 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { createWriteStream, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import updater from 'electron-updater'
 
-// Bower's desktop shell. Packaged, it starts the bundled Nuxt server on a free localhost port
+// Bower's desktop shell. Packaged, it starts the bundled Nuxt server on a localhost port
 // (run by Electron's own Node) and opens a window on it. In development (`npm run dev:desktop`)
 // it only opens a window on the `nuxt dev` server.
 const DEV_URL = process.env.BOWER_DEV_URL || 'http://localhost:3000'
@@ -23,16 +23,35 @@ if (process.env.BOWER_USER_DATA) app.setPath('userData', process.env.BOWER_USER_
 const primary = app.requestSingleInstanceLock()
 if (!primary) app.quit()
 
-function freePort() {
-  return new Promise((resolve, reject) => {
+// Resolves to the port it could listen on (0 picks any free one), or null when that port is taken.
+function tryPort(port) {
+  return new Promise((resolve) => {
     const s = createServer()
     s.unref()
-    s.on('error', reject)
-    s.listen(0, '127.0.0.1', () => {
+    s.on('error', () => resolve(null))
+    s.listen(port, '127.0.0.1', () => {
       const { port } = s.address()
       s.close(() => resolve(port))
     })
   })
+}
+
+// The page's browser data (last project, chat model, the downloaded voice and caption models) is
+// kept per origin, port included, so the server keeps the same port across launches: the one used
+// last time, or a free one (remembered from then on) if another program has taken it.
+const DEFAULT_PORT = 47821
+async function stablePort() {
+  const file = join(app.getPath('userData'), 'port.json')
+  let saved = DEFAULT_PORT
+  try { saved = JSON.parse(readFileSync(file, 'utf8')).port || DEFAULT_PORT } catch {}
+  const port = await tryPort(saved) ?? await tryPort(0)
+  if (port !== saved) {
+    try {
+      mkdirSync(app.getPath('userData'), { recursive: true })
+      writeFileSync(file, JSON.stringify({ port }))
+    } catch {}
+  }
+  return port
 }
 
 // Apps opened from Finder or a desktop launcher do not get the terminal's PATH, so ask the login shell.
@@ -91,7 +110,7 @@ function bundledChrome() {
 }
 
 async function startServer() {
-  const port = await freePort()
+  const port = await stablePort()
   const url = `http://127.0.0.1:${port}`
   const path = shellPath()
   const env = {

@@ -7,6 +7,8 @@ const { project, projects, selected, selectedIndex, mainTab, mode, playing, time
 const music = useMusic()
 const narration = useNarration()
 const toast = useToast()
+// package.json's version; "dev" marks a `nuxt dev` server rather than a build.
+const appVersion = `v${useRuntimeConfig().public.version}${import.meta.dev ? ' · dev' : ''}`
 
 const presenting = ref(false)
 const settingsOpen = ref(false)
@@ -295,7 +297,10 @@ async function copyPath() {
       <header class="flex items-center gap-3 border-b border-default px-4 py-3">
         <div class="flex items-center gap-2 pr-2">
           <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
-          <span class="text-lg font-semibold tracking-tight text-highlighted">Bower</span>
+          <div class="flex flex-col gap-0.5">
+            <span class="text-lg leading-none font-semibold tracking-tight text-highlighted">Bower</span>
+            <span class="text-[11px] leading-none text-muted tabular-nums">{{ appVersion }}</span>
+          </div>
         </div>
         <ProjectPicker @new="openNew" />
         <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />

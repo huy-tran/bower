@@ -1,3 +1,5 @@
+import { version } from './package.json'
+
 export default defineNuxtConfig({
   compatibilityDate: '2026-09-01',
   ssr: false,
@@ -12,6 +14,8 @@ export default defineNuxtConfig({
   },
   colorMode: { preference: 'light', fallback: 'light' },
   icon: { serverBundle: 'local' },
+  // Shown under the app name in the header.
+  runtimeConfig: { public: { version } },
   // Bundled into the server build so the first-run example works wherever the server runs from.
   nitro: { serverAssets: [{ baseName: 'seed', dir: 'seed' }] }
 })
