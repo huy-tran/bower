@@ -228,7 +228,7 @@ function removeCaption(c: Clip, i: number) {
 
           <UCard v-if="gen.open" :ui="{ body: 'p-3 sm:p-3 space-y-3' }">
             <p class="text-xs text-muted">A one-off line placed at the playhead, spoken by {{ narratorName }} at {{ narrator.speed.toFixed(2) }}× (<UButton variant="link" size="xs" class="p-0" label="change in settings" @click="emit('settings')" />). For narration that follows the scenes, ask Claude instead.</p>
-            <UTextarea v-model="gen.text" :rows="3" autoresize class="w-full" placeholder="e.g. Meet Flux. The fastest way to ship your ideas." />
+            <UTextarea v-model="gen.text" :rows="3" autoresize class="w-full" placeholder="e.g. Meet Acme. The fastest way to ship your ideas." />
             <div v-if="busy === 'speak' && progress" class="space-y-1">
               <p class="text-xs text-muted">{{ progress.label }}</p>
               <UProgress :model-value="progress.pct ?? null" size="xs" />

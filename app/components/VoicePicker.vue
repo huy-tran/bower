@@ -6,7 +6,7 @@ const open = defineModel<boolean>('open', { default: false })
 const { project, setProject } = useEditor()
 const toast = useToast()
 
-const DEFAULT_LINE = 'Meet Flux. The fastest way to ship your ideas, from the first sketch to the final launch.'
+const DEFAULT_LINE = 'Meet Acme. The fastest way to ship your ideas, from the first sketch to the final launch.'
 const sample = ref('')
 const speed = ref(1)
 const generating = ref<string | null>(null) // voice being generated

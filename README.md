@@ -15,7 +15,7 @@ npm install
 npm run dev        # http://localhost:3000
 ```
 
-On first run an example project ("Example: Flux teaser") is created in `storage/projects/`.
+On first run an example project ("Example: Product teaser") is created in `storage/projects/`.
 
 ## Features
 

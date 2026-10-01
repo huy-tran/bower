@@ -225,7 +225,7 @@ breakdown, the biggest moves on a drop.
 Narration is written per scene and spoken by the editor, so you never make audio yourself. To narrate a scene,
 put the script in its meta block:
 
-\`<script type="application/json" id="meta">{"duration": 4200, "voice": "Meet Flux. The fastest way to ship."}</script>\`
+\`<script type="application/json" id="meta">{"duration": 4200, "voice": "Meet Acme. The fastest way to ship."}</script>\`
 
 - The editor generates the speech as soon as the file is saved, places it at the start of the scene, and makes
   caption lines from it. Change the text and it is regenerated; remove the key to remove the narration.

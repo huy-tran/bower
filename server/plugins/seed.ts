@@ -21,8 +21,8 @@ export default defineNitroPlugin(async () => {
   if ((await listProjects()).length) return
   const dir = resolve('server/seed')
   const scene = async (title: string, file: string) => ({ title, html: await fs.readFile(join(dir, file), 'utf8') })
-  const p = await createProject('Example: Flux teaser', [
-    await scene('Meet Flux', 'intro.html'),
+  const p = await createProject('Example: Product teaser', [
+    await scene('Meet Acme', 'intro.html'),
     await scene('Anatomy', 'anatomy.html'),
     await scene('Every style', 'styles.html'),
     await scene('Logo lockup', 'logo.html')
