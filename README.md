@@ -28,7 +28,7 @@ npm run build:desktop   # installer in dist-desktop (Bower-Setup-<version>.exe o
 ```
 
 - The build ships the Nuxt server, ffmpeg and Puppeteer's Chrome. `.puppeteerrc.cjs` keeps that Chrome in `.cache/puppeteer` so it can be packed. `electron/prepare.mjs` bundles the Electron main process and stages it with the server and Chrome in `.desktop-stage` before `electron-builder` runs (config in `electron-builder.yml`).
-- Projects live in the app's data folder (`%APPDATA%\Bower\storage` on Windows, `~/Library/Application Support/Bower/storage` on macOS). The server and updater logs are in its logs folder. Set `BOWER_USER_DATA` to use another data folder, for example to try a build next to the installed app.
+- Projects live in the app's data folder (`%APPDATA%\Bower\storage` on Windows, `~/Library/Application Support/Bower/storage` on macOS). The server and updater logs are in its logs folder. Set `BOWER_USER_DATA` to use another data folder, for example to try a build next to the installed app. Such a copy never installs updates on quit, because the installer would replace the installed app.
 - The server only answers the app: each launch makes a random token that the window gets as a cookie, and Puppeteer's Chrome and Claude's `bower.mjs` helper send it too. Without the token (`npm run dev`) nothing is checked.
 - Users still need Claude Code installed and logged in. The app looks for `claude` on the PATH and in the usual install folders. Node is not needed: a `node` shim that runs Electron as Node is added to the end of the PATH for `node bower.mjs`.
 - **Browse…** for linked codebases uses the native folder dialog.
@@ -39,7 +39,7 @@ Bower is an internal tool for a Windows team, so `.github/workflows/desktop.yml`
 
 1. Bump `version` in `package.json` and commit.
 2. Tag it with the same version and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. CI uploads the installer to a draft GitHub release. Publish the draft. Installed apps download the update in the background and install it when they quit.
+3. CI uploads the installer to a draft GitHub release. Publish the draft. Installed apps check every hour and download the update in the background. The header then shows **Restart to update to vX.Y.Z**; clicking it installs and reopens Bower, otherwise the update installs the next time Bower quits.
 
 Running the workflow by hand builds without releasing and keeps the installer as a workflow artifact.
 

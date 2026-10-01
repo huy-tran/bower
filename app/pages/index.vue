@@ -311,6 +311,7 @@ async function copyPath() {
         <input ref="importInput" type="file" accept=".zip,application/zip" class="hidden" @change="importProject">
         <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />
         <div class="ml-auto flex items-center gap-2">
+          <UpdateButton />
           <UButton v-if="story.state.building" color="info" variant="subtle" size="sm" icon="i-heroicons-arrow-path" :label="`Building ${story.state.done + 1}/${story.state.total} · ${story.state.current}`" :ui="{ leadingIcon: 'animate-spin' }" @click="story.stop()">
             <template #trailing><UIcon name="i-heroicons-stop" class="size-4" /></template>
           </UButton>

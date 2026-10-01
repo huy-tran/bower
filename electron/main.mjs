@@ -193,10 +193,13 @@ function createWindow(url) {
   return win
 }
 
-// Native folder chooser for "Browse..." (linked codebases). Only Bower's own pages may ask.
+// Only Bower's own pages may use what preload.cjs offers.
 let appOrigin = null
+const fromApp = e => new URL(e.senderFrame.url).origin === appOrigin
+
+// Native folder chooser for "Browse..." (linked codebases).
 ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
-  if (new URL(e.senderFrame.url).origin !== appOrigin) return null
+  if (!fromApp(e)) return null
   const win = BrowserWindow.fromWebContents(e.sender)
   const r = await dialog.showOpenDialog(win, {
     title: typeof title === 'string' ? title.slice(0, 120) : 'Choose a folder',
@@ -207,16 +210,34 @@ ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
 })
 
 // Updates come from the GitHub releases (electron-builder.yml, publish). A new version downloads in
-// the background, the OS shows a notification, and it installs when Bower quits.
+// the background; the header then offers "Restart to update" (app/components/UpdateButton.vue),
+// and if nobody clicks it, it installs when Bower quits.
+let update = null // { version, state: 'downloading' | 'ready' }
+const sendUpdate = () => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('bower:update', update))
+
 function checkForUpdates() {
   const log = createWriteStream(join(app.getPath('logs'), 'updater.log'), { flags: 'a' })
   const write = level => (...a) => log.write(`${new Date().toISOString()} ${level} ${a.join(' ')}\n`)
   const { autoUpdater } = updater
   autoUpdater.logger = { info: write('info'), warn: write('warn'), error: write('error'), debug: () => {} }
-  const check = () => autoUpdater.checkForUpdatesAndNotify().catch(e => write('error')(e?.message ?? e))
+  // A copy with its own data folder (BOWER_USER_DATA, used for testing) shares the installed app's
+  // ID, so installing on quit would replace the real installation. Such copies only install on click.
+  autoUpdater.autoInstallOnAppQuit = !process.env.BOWER_USER_DATA
+  autoUpdater.on('update-available', (info) => { update = { version: info.version, state: 'downloading' }; sendUpdate() })
+  autoUpdater.on('update-downloaded', (info) => { update = { version: info.version, state: 'ready' }; sendUpdate() })
+  autoUpdater.on('error', () => { if (update?.state === 'downloading') { update = null; sendUpdate() } })
+  const check = () => { if (update?.state !== 'ready') autoUpdater.checkForUpdates().catch(e => write('error')(e?.message ?? e)) }
   check()
-  setInterval(check, 6 * 60 * 60 * 1000).unref()
+  setInterval(check, 60 * 60 * 1000).unref()
 }
+
+ipcMain.handle('bower:update-state', e => fromApp(e) ? update : null)
+ipcMain.handle('bower:install-update', (e) => {
+  if (!fromApp(e) || update?.state !== 'ready') return
+  quitting = true
+  server?.kill()
+  updater.autoUpdater.quitAndInstall(true, true) // silent install, then start the new version
+})
 
 app.on('second-instance', () => {
   const [win] = BrowserWindow.getAllWindows()
