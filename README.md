@@ -39,7 +39,7 @@ Bower is an internal tool for a Windows team, so `.github/workflows/desktop.yml`
 
 1. Bump `version` in `package.json` and commit.
 2. Tag it with the same version and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. CI uploads the installer to a draft GitHub release. Publish the draft. Installed apps check every hour and download the update in the background. The header then shows **Restart to update to vX.Y.Z**; clicking it installs and reopens Bower, otherwise the update installs the next time Bower quits.
+3. CI builds the installer and publishes the GitHub release (it uploads to a draft first and publishes once every file is there). Installed apps check every hour and download the update in the background, then a dialog offers **Restart now** or **Later**. Later keeps a **Restart to update to vX.Y.Z** button in the header, and the update also installs the next time Bower quits.
 
 Running the workflow by hand builds without releasing and keeps the installer as a workflow artifact.
 

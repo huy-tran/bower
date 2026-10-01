@@ -18,7 +18,7 @@ extraMetadata:
   main: .desktop-stage/app/main.cjs
 npmRebuild: false
 
-# Auto-update source, and where CI uploads releases (as a draft, published by hand).
+# Auto-update source, and where CI uploads releases (to a draft, which the workflow then publishes).
 publish:
   provider: github
   owner: huy-tran
