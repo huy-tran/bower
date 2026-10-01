@@ -1,9 +1,23 @@
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { createProject, listProjects, saveProject } from '../utils/store'
+import { STORAGE } from '../utils/paths'
+import { createProject, listProjects, loadProject, saveProject } from '../utils/store'
+import { purgeOldTrash } from '../utils/trash'
 
-// First run: create an example project so there is something to play with.
 export default defineNitroPlugin(async () => {
+  // Projects made before the rename to Bower keep their versions and chats in .storyboard/.
+  for (const d of await fs.readdir(STORAGE, { withFileTypes: true }).catch(() => [])) {
+    if (!d.isDirectory()) continue
+    const from = join(STORAGE, d.name, '.storyboard'), to = join(STORAGE, d.name, '.bower')
+    if (await fs.stat(from).catch(() => null) && !await fs.stat(to).catch(() => null)) {
+      await fs.rename(from, to)
+      await saveProject(await loadProject(d.name)).catch(() => {}) // regenerate CLAUDE.md
+    }
+  }
+
+  await purgeOldTrash().catch(() => {})
+
+  // First run: create an example project so there is something to play with.
   if ((await listProjects()).length) return
   const dir = resolve('server/seed')
   const scene = async (title: string, file: string) => ({ title, html: await fs.readFile(join(dir, file), 'utf8') })

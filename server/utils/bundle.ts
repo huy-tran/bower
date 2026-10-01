@@ -5,7 +5,7 @@ import { addVersion, createProject, loadProject, projectDir, saveProject, type P
 
 // Project bundles hold what a teammate needs to keep working: project.json, scenes, audio and assets.
 // Renders, versions and chat history stay on the machine they were made on.
-const INCLUDE = ['scenes', 'audio', 'assets']
+const INCLUDE = ['scenes', 'audio', 'assets', 'brand']
 
 async function walk(dir: string): Promise<string[]> {
   const out: string[] = []
@@ -21,7 +21,7 @@ export async function exportBundle(pid: string) {
   const p = await loadProject(pid)
   const root = projectDir(pid)
   const files: Zippable = {
-    'project.json': strToU8(JSON.stringify({ ...p, format: 'storyboard-project@1' }, null, 2))
+    'project.json': strToU8(JSON.stringify({ ...p, codebases: [], format: 'bower-project@1' }, null, 2))
   }
   for (const d of INCLUDE) {
     for (const f of await walk(join(root, d))) {
@@ -46,7 +46,7 @@ export async function importBundle(zip: Uint8Array) {
 
   const scenes = src.scenes
     .filter(s => /^[a-z0-9][a-z0-9-]*$/.test(s.id) && entries[`${prefix}scenes/${s.id}.html`])
-    .map(s => ({ id: s.id, title: String(s.title || s.id), html: strFromU8(entries[`${prefix}scenes/${s.id}.html`]!) }))
+    .map(s => ({ id: s.id, title: String(s.title || s.id), transition: s.transition ?? null, html: strFromU8(entries[`${prefix}scenes/${s.id}.html`]!) }))
   if (!scenes.length) throw createError({ statusCode: 422, message: 'None of the scene files were found' })
 
   const p = await createProject(String(src.name || 'Imported project'), [])
@@ -54,7 +54,7 @@ export async function importBundle(zip: Uint8Array) {
   for (const [name, data] of Object.entries(entries)) {
     if (!name.startsWith(prefix) || name.endsWith('/')) continue
     const rel = name.slice(prefix.length)
-    if (!/^(audio|assets)\/[\w\-. /]+$/.test(rel) || rel.includes('..')) continue
+    if (!/^(audio|assets|brand)\/[\w\-. /]+$/.test(rel) || rel.includes('..')) continue
     await fs.mkdir(join(root, rel, '..'), { recursive: true })
     await fs.writeFile(join(root, rel), data)
   }
@@ -70,8 +70,13 @@ export async function importBundle(zip: Uint8Array) {
     width: Number(src.width) || 1920,
     height: Number(src.height) || 1080,
     fps: Number(src.fps) || 30,
-    scenes: scenes.map(s => ({ id: s.id, title: s.title })),
-    audio: src.audio?.file && entries[`${prefix}audio/${src.audio.file}`] ? src.audio : null
+    scenes: scenes.map(s => ({ id: s.id, title: s.title, transition: s.transition })),
+    audio: src.audio?.file && entries[`${prefix}audio/${src.audio.file}`] ? src.audio : null,
+    clips: (Array.isArray(src.clips) ? src.clips : []).filter(c => c?.file && entries[`${prefix}audio/${c.file}`]),
+    captions: { ...p.captions, ...src.captions },
+    visualChecks: src.visualChecks ?? true,
+    // The kit itself is not shared, but its copy in brand/ still guides Claude.
+    brandKitId: null
   }
   await saveProject(next)
   return next

@@ -79,6 +79,8 @@ export const SCENE_RUNTIME = String.raw`
     // Music, scene-relative ms. Empty arrays when the project has no track.
     bpm: ctx.bpm || null,
     beats: ctx.beats || [], downbeats: ctx.downbeats || [], phrases: ctx.phrases || [],
+    // Music sections overlapping this scene: [{ label, energy, start, end }], scene-relative ms.
+    sections: ctx.sections || [],
     beat: function (n) { return VE.beats[n]; },
     downbeat: function (n) { return VE.downbeats[n]; },
     snap: function (t, grid) { var l = VE[grid || 'beats']; return l && l.length ? nearest(l, t) : t; },
@@ -105,7 +107,13 @@ export const SCENE_RUNTIME = String.raw`
   window.addEventListener('error', function (e) { report('error', { message: e.message }); });
   window.addEventListener('message', function (e) {
     var d = e.data;
-    if (d && d.__ve && d.type === 'seek') VE.seek(d.t);
+    if (!d || !d.__ve || d.type !== 'seek') return;
+    VE.seek(d.t);
+    // The renderer waits for this acknowledgement (after fonts and a paint) before taking a frame.
+    if (d.id != null) {
+      var ack = function () { requestAnimationFrame(function () { report('seeked', { id: d.id }); }); };
+      document.fonts ? document.fonts.ready.then(ack) : ack();
+    }
   });
   window.addEventListener('resize', fit);
   document.addEventListener('DOMContentLoaded', function () {

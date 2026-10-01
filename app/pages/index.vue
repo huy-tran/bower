@@ -1,31 +1,52 @@
 <script setup lang="ts">
+import type { DropdownMenuItem } from '@nuxt/ui'
+import type { SettingsTab } from '~/components/ProjectSettingsModal.vue'
+
 const ed = useEditor()
-const { project, projects, selected, selectedIndex, mainTab, mode, playing, time, active, marks, timelineDuration, timelineStart } = ed
+const { project, projects, selected, selectedIndex, mainTab, mode, playing, time, rate, loop, view, layers, active, caption, marks, clipMarks, timelineDuration, timelineStart } = ed
 const music = useMusic()
+const narration = useNarration()
 const toast = useToast()
 
 const presenting = ref(false)
-const artOpen = ref(false)
-const artDraft = ref('')
+const settingsOpen = ref(false)
+const storyOpen = ref(false)
+const historyOpen = ref(false)
+const story = useStoryboard()
+const settingsTab = ref<SettingsTab>('general')
 const newOpen = ref(false)
-const newName = ref('')
+const newProject = reactive({ name: '', folder: ROOT })
+const folders = useFolders()
+const deleteOpen = ref(false)
+const trashOpen = ref(false)
+const soundOpen = ref(false)
 const dropping = ref(false)
+const loaded = ref(false)
 const stageBox = ref<HTMLElement>()
 const stageSize = reactive({ w: 0, h: 0 })
 let wasPlaying = false
 
+// Fit the stage into the preview area at the project's own shape (16:9, 9:16, 1:1, 4:5...).
+const stageArea = reactive({ w: 0, h: 0 })
+watchEffect(() => {
+  const p = project.value
+  const r = p ? p.width / p.height : 16 / 9
+  const w = Math.min(stageArea.w, stageArea.h * r)
+  stageSize.w = Math.floor(w)
+  stageSize.h = Math.floor(w / r)
+})
+
 onMounted(async () => {
   await ed.loadProjects()
   let last: string | null = null
-  try { last = localStorage.getItem('storyboard:project') } catch {}
+  try { last = localStorage.getItem('bower:project') } catch {}
   const id = projects.value.find(p => p.id === last)?.id ?? projects.value[0]?.id
   if (id) await ed.openProject(id)
+  loaded.value = true
 
   const ro = new ResizeObserver(([e]) => {
-    const { width, height } = e!.contentRect
-    const w = Math.min(width, height * 16 / 9)
-    stageSize.w = Math.floor(w)
-    stageSize.h = Math.floor(w * 9 / 16)
+    stageArea.w = e!.contentRect.width
+    stageArea.h = e!.contentRect.height
   })
   watchEffect(() => { if (stageBox.value) ro.observe(stageBox.value) })
 
@@ -41,13 +62,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onDrop)
 })
 
-const projectId = computed({
-  get: () => project.value?.id,
-  set: (id) => { if (id) ed.openProject(id) }
-})
-const projectItems = computed(() => projects.value.map(p => ({ label: p.name, value: p.id })))
+const mainTabs = [{ label: 'Scenes', value: 'scenes' }, { label: 'Render', value: 'render' }]
+const modeTabs = [{ label: 'This scene', value: 'scene' }, { label: 'Whole video', value: 'video' }]
+const modeModel = computed({ get: () => mode.value, set: v => ed.setMode(v as PlayMode) })
+const rateItems = [{ label: '0.25×', value: 0.25 }, { label: '0.5×', value: 0.5 }, { label: '1×', value: 1 }]
+const rateModel = computed({ get: () => rate.value, set: v => ed.setRate(Number(v)) })
+watch(mainTab, () => ed.pause())
 
-// Only keep the scenes that can be on screen loaded in the main player.
+// In scene mode only the selected scene is loaded; in video mode all of them, so cuts and transitions are instant.
 const playerScenes = computed(() => {
   const p = project.value
   if (!p || !selected.value) return []
@@ -56,6 +78,7 @@ const playerScenes = computed(() => {
 
 const cuts = computed(() => mode.value === 'video' ? project.value?.scenes.slice(1).map(s => ({ at: s.start, title: s.title })) : [])
 
+// Waveform peaks over the current timeline (dense enough to zoom into).
 const wave = computed(() => {
   const a = project.value?.audio
   if (!a?.peaks?.length || !a.duration) return undefined
@@ -64,12 +87,16 @@ const wave = computed(() => {
   const n = a.peaks.length
   const i0 = Math.max(0, Math.floor(from / a.duration * n)), i1 = Math.min(n, Math.ceil(to / a.duration * n))
   const slice = a.peaks.slice(i0, i1)
-  if (slice.length < 2) return undefined
-  const step = Math.max(1, Math.floor(slice.length / 400))
-  const out: number[] = []
-  for (let i = 0; i < slice.length; i += step) out.push(Math.max(...slice.slice(i, i + step)))
-  return out
+  return slice.length < 2 ? undefined : slice
 })
+
+const zoomed = computed(() => view.value.to - view.value.from < 0.999)
+function zoom(factor: number) {
+  const { from, to } = view.value
+  const at = timelineDuration.value ? time.value / timelineDuration.value : 0.5
+  const span = Math.min(1, Math.max(0.02, (to - from) * factor))
+  ed.setView(at - span / 2, at + span / 2)
+}
 
 function onScrub(activeNow: boolean) {
   if (activeNow) {
@@ -80,79 +107,151 @@ function onScrub(activeNow: boolean) {
   }
 }
 
-function typing(e: KeyboardEvent) {
+// Leave keys to whatever has focus: text fields, and Nuxt UI tabs, menus and dialogs have their own arrow-key navigation.
+function focusOwnsKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
-  return t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)
+  if (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return true
+  if (t.closest('[role=tablist],[role=menu],[role=listbox],[role=dialog],[role=slider]')) return true
+  // Space on a focused button presses it; toggling playback as well would undo a click on Play.
+  return e.key === ' ' && !!t.closest('button,a')
 }
 
 function onKey(e: KeyboardEvent) {
-  if (presenting.value || typing(e) || mainTab.value !== 'scenes') return
-  const frame = 1000 / (project.value?.fps || 30)
+  if (presenting.value || focusOwnsKey(e) || mainTab.value !== 'scenes' || !project.value) return
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  const frame = 1000 / (project.value.fps || 30)
+  const k = e.key.toLowerCase()
   if (e.key === ' ') { e.preventDefault(); ed.toggle() }
   else if (e.key === 'ArrowRight') { e.preventDefault(); ed.pause(); ed.seek(time.value + (e.shiftKey ? 1000 : frame)) }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); ed.pause(); ed.seek(time.value - (e.shiftKey ? 1000 : frame)) }
-  else if (e.key === 'Home') { e.preventDefault(); ed.seek(0) }
+  else if (e.key === 'Home') { e.preventDefault(); ed.seek(loop.value?.from ?? 0) }
+  else if (k === 'i') ed.setLoop(time.value, loop.value?.to ?? timelineDuration.value)
+  else if (k === 'o') ed.setLoop(loop.value?.from ?? 0, time.value)
+  else if (k === 'l') ed.setLoop(null)
+  else if (e.key === '+' || e.key === '=') zoom(0.6)
+  else if (e.key === '-') zoom(1 / 0.6)
+  else if (e.key === '0') ed.setView(0, 1)
   else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    const p = project.value!
+    const p = project.value
     const i = selectedIndex.value + (e.key === 'ArrowDown' ? 1 : -1)
     if (p.scenes[i]) { e.preventDefault(); ed.select(p.scenes[i]!.id) }
   }
 }
 
-const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files')
+// Only audio drags show the "drop music" overlay; images go to the chat panel.
+const audioDrag = (e: DragEvent) => FEATURES.music && [...(e.dataTransfer?.items ?? [])].some(i => i.kind === 'file' && i.type.startsWith('audio/'))
 function onDragOver(e: DragEvent) {
-  if (!hasFiles(e)) return
+  if (!e.dataTransfer?.types.includes('Files')) return
   e.preventDefault()
-  dropping.value = true
+  dropping.value = audioDrag(e)
 }
 function onDragLeave(e: DragEvent) {
   if (!e.relatedTarget) dropping.value = false
 }
 async function onDrop(e: DragEvent) {
-  if (!hasFiles(e)) return
+  if (!e.dataTransfer?.types.includes('Files')) return
   e.preventDefault()
   dropping.value = false
-  const f = [...(e.dataTransfer?.files ?? [])].find(f => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name))
-  if (!f) return toast.add({ title: 'Drop an audio file (mp3, wav, m4a, ogg, flac)', color: 'warning' })
+  const files = [...(e.dataTransfer?.files ?? [])]
+  const f = FEATURES.music ? files.find(f => f.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(f.name)) : undefined
+  if (!f) {
+    if (files.some(f => f.type.startsWith('image/'))) return toast.add({ title: 'Drop images on the chat panel to attach them', color: 'neutral' })
+    return toast.add({ title: FEATURES.music ? 'Drop an audio file (mp3, wav, m4a, ogg, flac)' : 'Drop images on the chat panel; sound effects and voice-over go in the Sound panel', color: 'warning' })
+  }
+  if (!project.value) return
   try {
     await music.upload(f)
-    toast.add({ title: 'Music analysed', description: `${Math.round(project.value?.audio?.bpm ?? 0)} BPM · beats show on the timeline`, color: 'success' })
+    toast.add({ title: 'Music analysed', description: `${Math.round(project.value?.audio?.bpm ?? 0)} BPM · beats and sections show on the timeline`, color: 'success' })
   } catch (err: any) {
     toast.add({ title: 'Could not load that track', description: err?.data?.message || err?.message, color: 'error' })
   }
 }
 
-function openArt() {
-  artDraft.value = project.value?.artDirection ?? ''
-  artOpen.value = true
-}
-async function saveArt() {
-  ed.setProject(await $fetch(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { artDirection: artDraft.value } }))
-  artOpen.value = false
-  toast.add({ title: 'Art direction saved', description: 'Claude applies it to every prompt from now on.', color: 'success' })
+function openSettings(tab: SettingsTab = 'general') {
+  settingsTab.value = tab
+  settingsOpen.value = true
 }
 
+// New projects go in the open project's folder unless another is picked.
+function openNew() {
+  newProject.folder = toFolderValue(project.value?.folder ?? '')
+  newOpen.value = true
+}
 async function createProject() {
-  const name = newName.value.trim()
+  const name = newProject.name.trim()
   if (!name) return
-  const p = await $fetch<{ id: string }>('/api/projects', { method: 'POST', body: { name } })
+  const p = await $fetch<{ id: string }>('/api/projects', { method: 'POST', body: { name, folder: fromFolderValue(newProject.folder) } })
   await ed.loadProjects()
+  await folders.load()
   await ed.openProject(p.id)
   newOpen.value = false
-  newName.value = ''
+  newProject.name = ''
+}
+
+async function duplicateProject() {
+  const p = await $fetch<{ id: string, name: string }>(`/api/projects/${project.value!.id}/duplicate`, { method: 'POST', body: {} })
+  await ed.loadProjects()
+  await ed.openProject(p.id)
+  toast.add({ title: `Created "${p.name}"`, color: 'success' })
+}
+
+async function adapt(format: string) {
+  try {
+    const p = await $fetch<{ id: string, name: string }>(`/api/projects/${project.value!.id}/adapt`, { method: 'POST', body: { format } })
+    await ed.loadProjects()
+    await ed.openProject(p.id)
+    toast.add({ title: `Created "${p.name}"`, description: 'Claude is re-laying out every scene for the new size. Follow along in the Project chat.', color: 'success' })
+  } catch (e: any) {
+    toast.add({ title: 'Could not create that format', description: e?.data?.message, color: 'error' })
+  }
+}
+
+async function deleteProject() {
+  const name = project.value!.name
+  deleteOpen.value = false
+  await $fetch(`/api/projects/${project.value!.id}`, { method: 'DELETE' })
+  ed.closeProject()
+  await ed.loadProjects()
+  if (projects.value[0]) await ed.openProject(projects.value[0].id)
+  toast.add({ title: `"${name}" moved to the trash`, description: 'Restore it from Trash within 30 days.', color: 'neutral' })
 }
 
 const importInput = ref<HTMLInputElement>()
 const health = ref<{ claude: { installed: boolean, loggedIn: boolean } } | null>(null)
 onMounted(async () => { health.value = await $fetch('/api/health').catch(() => null) as any })
 
-const projectMenu = computed(() => [[
-  { label: 'Export project (.zip)', icon: 'i-lucide-package', disabled: !project.value, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/export` } },
-  { label: 'Import project…', icon: 'i-lucide-package-open', onSelect: () => importInput.value?.click() }
-], [
-  { label: 'Download web player (.html)', icon: 'i-lucide-globe', disabled: !project.value, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/player?download=1` } },
-  { label: 'Preview web player', icon: 'i-lucide-external-link', disabled: !project.value, onSelect: () => { window.open(`/api/projects/${project.value!.id}/player`, '_blank') } }
-]])
+const formatLabel = computed(() => {
+  const p = project.value
+  if (!p) return ''
+  const r = p.width / p.height
+  return Math.abs(r - 16 / 9) < 0.01 ? '16:9' : Math.abs(r - 9 / 16) < 0.01 ? '9:16' : Math.abs(r - 1) < 0.01 ? '1:1' : Math.abs(r - 0.8) < 0.01 ? '4:5' : `${p.width}×${p.height}`
+})
+
+const projectMenu = computed<DropdownMenuItem[][]>(() => {
+  const has = !!project.value
+  const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
+  return [[
+    { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', disabled: !has, onSelect: () => (storyOpen.value = true) },
+    { label: 'History…', icon: 'i-heroicons-clock', disabled: !has, onSelect: () => (historyOpen.value = true) },
+    { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', disabled: !has, onSelect: () => openSettings() },
+    { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', disabled: !has, onSelect: duplicateProject },
+    {
+      label: 'New version for social…', icon: 'i-heroicons-device-phone-mobile', disabled: !has,
+      children: [formats.map(f => ({
+        label: { '16:9': 'Landscape 16:9', '9:16': 'Vertical 9:16 (Reels, TikTok, Shorts)', '1:1': 'Square 1:1', '4:5': 'Portrait 4:5 (feed)' }[f]!,
+        onSelect: () => adapt(f)
+      }))]
+    }
+  ], [
+    { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', disabled: !has, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/export` } },
+    { label: 'Import project…', icon: 'i-heroicons-arrow-up-tray', onSelect: () => importInput.value?.click() },
+    { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', disabled: !has, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/player?download=1` } },
+    { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', disabled: !has, onSelect: () => { window.open(`/api/projects/${project.value!.id}/player`, '_blank') } }
+  ], [
+    { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) },
+    { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', disabled: !has, onSelect: () => (deleteOpen.value = true) }
+  ]]
+})
 
 async function importProject(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
@@ -185,74 +284,120 @@ async function copyPath() {
       class="mb-3"
       color="warning"
       variant="subtle"
-      icon="i-lucide-triangle-alert"
+      icon="i-heroicons-exclamation-triangle"
       :title="health.claude.installed ? 'Claude Code is not signed in' : 'Claude Code is not installed'"
       :description="health.claude.installed
         ? 'Prompts will fail until you sign in. Run `claude` in a terminal once and log in, then reload this page.'
         : 'Prompts need the Claude Code CLI. Install it from claude.com/claude-code, run `claude` once to sign in, then restart this app.'"
     />
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-default shadow-xl ring-1 ring-default">
       <!-- Header -->
-      <header class="flex items-center gap-3 border-b border-zinc-200 px-4 py-3">
+      <header class="flex items-center gap-3 border-b border-default px-4 py-3">
         <div class="flex items-center gap-2 pr-2">
-          <span class="grid size-7 place-items-center rounded-lg bg-zinc-900 text-white"><UIcon name="i-lucide-calendar-range" class="size-4" /></span>
-          <span class="text-lg font-semibold tracking-tight text-zinc-900">Storyboard</span>
+          <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
+          <span class="text-lg font-semibold tracking-tight text-highlighted">Bower</span>
         </div>
-        <USelect v-model="projectId" :items="projectItems" class="w-64" placeholder="Choose a project" />
-        <UButton color="neutral" variant="outline" icon="i-lucide-plus" label="New project" @click="newOpen = true" />
+        <ProjectPicker @new="openNew" />
+        <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />
+        <UButton color="neutral" variant="outline" icon="i-heroicons-plus" label="New project" @click="openNew" />
         <UDropdownMenu :items="projectMenu" :content="{ align: 'start' }">
-          <UButton color="neutral" variant="ghost" icon="i-lucide-ellipsis" aria-label="Project actions" />
+          <UButton color="neutral" variant="ghost" icon="i-heroicons-ellipsis-horizontal" aria-label="Project actions" />
         </UDropdownMenu>
         <input ref="importInput" type="file" accept=".zip,application/zip" class="hidden" @change="importProject">
-        <div class="flex rounded-lg bg-zinc-100 p-0.5 text-sm">
-          <button v-for="t in (['scenes', 'render'] as const)" :key="t" class="rounded-md px-4 py-1.5 capitalize transition" :class="mainTab === t ? 'bg-white font-medium text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'" @click="mainTab = t; ed.pause()">
-            {{ t }}
-          </button>
-        </div>
+        <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />
         <div class="ml-auto flex items-center gap-2">
-          <UButton color="neutral" variant="outline" icon="i-lucide-palette" label="Art direction" :disabled="!project" @click="openArt" />
-          <UButton color="neutral" variant="outline" icon="i-lucide-clipboard-copy" label="Copy path" :disabled="!selected" @click="copyPath" />
-          <UButton color="neutral" icon="i-lucide-maximize" label="Present" :disabled="!project" @click="presenting = true" />
+          <UButton v-if="story.state.building" color="info" variant="subtle" size="sm" icon="i-heroicons-arrow-path" :label="`Building ${story.state.done + 1}/${story.state.total} · ${story.state.current}`" :ui="{ leadingIcon: 'animate-spin' }" @click="story.stop()">
+            <template #trailing><UIcon name="i-heroicons-stop" class="size-4" /></template>
+          </UButton>
+          <NarrationStatus />
+          <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
+            <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />
+          </UTooltip>
+          <UTooltip text="Name, art direction, brand kit, codebase, narrator and captions">
+            <UButton color="neutral" variant="outline" icon="i-heroicons-cog-6-tooth" label="Settings" :disabled="!project" @click="openSettings()" />
+          </UTooltip>
+          <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document" label="Copy path" :disabled="!selected" @click="copyPath" />
+          <UColorModeButton />
+          <UButton icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
         </div>
       </header>
 
-      <div v-if="!project" class="grid flex-1 place-items-center text-sm text-zinc-400">
-        <UIcon name="i-lucide-loader-circle" class="size-6 animate-spin" />
-      </div>
+      <UEmpty v-if="!loaded" loading variant="naked" title="Loading projects" class="flex-1 justify-center" />
+      <UEmpty
+        v-else-if="!project"
+        variant="naked"
+        size="lg"
+        icon="i-heroicons-film"
+        title="No projects"
+        description="Start a new motion-graphics project, or restore one from the trash."
+        class="flex-1 justify-center"
+        :actions="[
+          { label: 'New project', icon: 'i-heroicons-plus', onClick: () => { newOpen = true } },
+          { label: 'Open trash', icon: 'i-heroicons-archive-box', color: 'neutral', variant: 'outline', onClick: () => { trashOpen = true } }
+        ]"
+      />
 
       <template v-else-if="mainTab === 'scenes'">
         <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(380px,32%)]">
           <!-- Stage -->
-          <section class="flex min-h-0 flex-col bg-zinc-100/80">
-            <div class="px-6 pt-3 pb-2 text-sm">
-              <span class="font-medium text-zinc-900">
+          <section class="flex min-h-0 flex-col bg-muted">
+            <div class="flex items-center gap-2 px-6 pt-2.5 pb-2 text-sm">
+              <span class="font-medium text-highlighted">
                 <template v-if="mode === 'scene'">Scene {{ selectedIndex + 1 }} of {{ project.scenes.length }}</template>
                 <template v-else>Whole video</template>
               </span>
-              <span class="text-zinc-500"> · {{ active?.scene.title }}<template v-if="mode === 'scene'"> · loops</template></span>
+              <span class="text-muted">· {{ active?.scene.title }}<template v-if="mode === 'scene' && !loop"> · loops</template></span>
+              <UBadge v-if="loop" color="primary" variant="subtle" size="sm" class="ml-1" icon="i-heroicons-arrow-path" :label="`Looping ${fmtSeconds(loop.from)}-${fmtSeconds(loop.to)}`" />
+              <UButton v-if="loop" size="xs" color="neutral" variant="ghost" icon="i-heroicons-x-mark" aria-label="Clear loop" @click="ed.setLoop(null)" />
+              <UBadge v-if="rate !== 1" color="warning" variant="subtle" size="sm" :label="`${rate}× speed`" />
+              <div class="ml-auto flex items-center gap-2">
+                <UFieldGroup size="sm" class="shrink-0">
+                  <UTooltip text="Zoom out" :kbds="['-']"><UButton color="neutral" variant="outline" icon="i-heroicons-magnifying-glass-minus" aria-label="Zoom out" :disabled="!zoomed" @click="zoom(1 / 0.6)" /></UTooltip>
+                  <UTooltip text="Zoom in" :kbds="['+']"><UButton color="neutral" variant="outline" icon="i-heroicons-magnifying-glass-plus" aria-label="Zoom in" @click="zoom(0.6)" /></UTooltip>
+                </UFieldGroup>
+                <UTooltip text="Playback speed">
+                  <USelect v-model="rateModel" :items="rateItems" size="sm" class="w-20 shrink-0" aria-label="Playback speed" />
+                </UTooltip>
+                <UTooltip text="Shift-drag on the timeline, or press I and O, to loop a region">
+                  <UButton size="sm" color="neutral" :variant="loop ? 'soft' : 'outline'" icon="i-heroicons-arrow-path-rounded-square" aria-label="Loop region" class="shrink-0" @click="loop ? ed.setLoop(null) : ed.setLoop(Math.max(0, time - 500), Math.min(timelineDuration, time + 1500))" />
+                </UTooltip>
+                <UButton size="sm" color="neutral" variant="outline" icon="i-heroicons-speaker-wave" label="Sound" class="shrink-0" @click="soundOpen = true" />
+                <MusicControl v-if="FEATURES.music" class="shrink-0" />
+              </div>
             </div>
             <div ref="stageBox" class="flex min-h-0 flex-1 items-center justify-center px-6">
-              <div :style="{ width: `${stageSize.w}px`, height: `${stageSize.h}px` }">
-                <ScenePlayer v-if="active" :project="project" :scenes="playerScenes" :active-id="active.scene.id" :t="active.t" rounded />
+              <div class="cursor-pointer" :style="{ width: `${stageSize.w}px`, height: `${stageSize.h}px` }" title="Click to play or pause" @click="ed.toggle()">
+                <ScenePlayer v-if="active" :project="project" :scenes="playerScenes" :layers="layers" :caption="caption" rounded fixable />
               </div>
             </div>
-            <div class="flex items-center gap-4 px-6 pt-3 pb-3">
-              <div class="flex shrink-0 rounded-lg bg-white p-0.5 text-sm ring-1 ring-zinc-200">
-                <button class="rounded-md px-3 py-1.5" :class="mode === 'scene' ? 'bg-zinc-900 font-medium text-white' : 'text-zinc-500 hover:text-zinc-800'" @click="ed.setMode('scene')">This scene</button>
-                <button class="rounded-md px-3 py-1.5" :class="mode === 'video' ? 'bg-zinc-900 font-medium text-white' : 'text-zinc-500 hover:text-zinc-800'" @click="ed.setMode('video')">Whole video</button>
-              </div>
-              <button class="grid size-11 shrink-0 place-items-center rounded-full bg-zinc-900 text-white shadow transition hover:bg-zinc-700" :title="playing ? 'Pause (Space)' : 'Play (Space)'" @click="ed.toggle()">
-                <UIcon :name="playing ? 'i-lucide-pause' : 'i-lucide-play'" class="size-5" :class="!playing && 'translate-x-px'" />
-              </button>
-              <span class="w-28 shrink-0 font-mono text-sm text-zinc-700 tabular-nums">{{ (time / 1000).toFixed(2) }} <span class="text-zinc-400">/ {{ fmtSeconds(timelineDuration) }}</span></span>
-              <TimelineBar class="min-w-0 flex-1" :duration="timelineDuration" :time="time" :marks="marks" :cuts="cuts" :wave="wave" @seek="ed.seek" @scrub="onScrub" />
-              <MusicControl class="shrink-0" />
+            <div class="flex items-center gap-3 px-6 pt-3 pb-3">
+              <UTabs v-model="modeModel" :items="modeTabs" :content="false" color="neutral" class="w-auto shrink-0" />
+              <UTooltip :text="playing ? 'Pause' : 'Play'" :kbds="['space']">
+                <UButton color="neutral" size="xl" class="shrink-0 rounded-full" :icon="playing ? 'i-heroicons-pause' : 'i-heroicons-play'" :aria-label="playing ? 'Pause' : 'Play'" @click="ed.toggle()" />
+              </UTooltip>
+              <span class="w-24 shrink-0 font-mono text-sm text-default tabular-nums">{{ (time / 1000).toFixed(2) }} <span class="text-dimmed">/ {{ fmtSeconds(timelineDuration, 1) }}</span></span>
+              <TimelineBar
+                class="min-w-0 flex-1"
+                :duration="timelineDuration"
+                :time="time"
+                :playing="playing"
+                :marks="marks"
+                :cuts="cuts"
+                :clips="clipMarks"
+                :wave="wave"
+                :loop="loop"
+                :view="view"
+                @seek="ed.seek"
+                @scrub="onScrub"
+                @loop="ed.setLoop"
+                @view="ed.setView"
+              />
             </div>
           </section>
 
           <ChatPanel />
         </div>
-        <div class="border-t border-zinc-200 bg-white">
+        <div class="border-t border-default bg-default">
           <SceneStrip />
         </div>
       </template>
@@ -261,36 +406,44 @@ async function copyPath() {
     </div>
 
     <PresentOverlay v-if="presenting" @close="presenting = false" />
+    <SoundPanel v-if="project" v-model:open="soundOpen" @settings="openSettings('sound')" />
+    <TrashModal v-model:open="trashOpen" />
+    <ProjectSettingsModal v-if="project" v-model:open="settingsOpen" v-model:tab="settingsTab" />
+    <StoryboardModal v-if="project" v-model:open="storyOpen" />
+    <HistoryModal v-if="project" v-model:open="historyOpen" />
 
-    <div v-if="dropping" class="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-zinc-900/40 backdrop-blur-sm">
-      <div class="rounded-2xl bg-white px-10 py-8 text-center shadow-2xl">
-        <UIcon name="i-lucide-audio-waveform" class="mx-auto size-10 text-zinc-800" />
-        <p class="mt-3 text-lg font-semibold text-zinc-900">Drop music to sync</p>
-        <p class="text-sm text-zinc-500">Beats, downbeats and phrases are detected automatically.</p>
-      </div>
+    <div v-if="dropping" class="pointer-events-none fixed inset-0 z-40 grid place-items-center bg-inverted/30 backdrop-blur-sm">
+      <UEmpty
+        variant="outline"
+        size="lg"
+        icon="i-heroicons-signal"
+        title="Drop music to sync"
+        description="Beats, downbeats, phrases and sections are detected automatically. Sound effects and voice-over go in the Sound panel."
+        class="bg-default shadow-2xl"
+      />
     </div>
 
-    <UModal v-model:open="artOpen" title="Art direction" description="Project-wide style guidance included in every prompt to Claude.">
+    <UModal v-model:open="newOpen" title="New project" :ui="{ footer: 'justify-end' }">
       <template #body>
-        <UTextarea v-model="artDraft" :rows="10" autoresize class="w-full" placeholder="e.g. Swiss minimalism. Inter Display, very tight tracking. Black on warm off-white (#faf9f7). One accent colour: #3b82f6. Motion is calm and precise - outExpo arrivals, never bouncy." />
-        <div class="mt-4 flex justify-end gap-2">
-          <UButton color="neutral" variant="ghost" label="Cancel" @click="artOpen = false" />
-          <UButton color="neutral" label="Save" @click="saveArt" />
-        </div>
+        <UForm id="new-project" :state="newProject" @submit="createProject">
+          <UFormField label="Name" name="name">
+            <UInput v-model="newProject.name" placeholder="e.g. Launch teaser" autofocus class="w-full" />
+          </UFormField>
+          <UFormField label="Folder" name="folder" class="mt-4">
+            <USelect v-model="newProject.folder" :items="folders.items.value" class="w-full" />
+          </UFormField>
+        </UForm>
+      </template>
+      <template #footer>
+        <UButton color="neutral" variant="ghost" label="Cancel" @click="newOpen = false" />
+        <UButton type="submit" form="new-project" color="neutral" label="Create" :disabled="!newProject.name.trim()" />
       </template>
     </UModal>
 
-    <UModal v-model:open="newOpen" title="New project">
-      <template #body>
-        <form class="space-y-4" @submit.prevent="createProject">
-          <UFormField label="Name">
-            <UInput v-model="newName" placeholder="e.g. Launch teaser" autofocus class="w-full" />
-          </UFormField>
-          <div class="flex justify-end gap-2">
-            <UButton color="neutral" variant="ghost" label="Cancel" @click="newOpen = false" />
-            <UButton type="submit" color="neutral" label="Create" :disabled="!newName.trim()" />
-          </div>
-        </form>
+    <UModal v-model:open="deleteOpen" :title="`Delete “${project?.name}”?`" description="The project moves to the trash. You can restore it for 30 days." :ui="{ footer: 'justify-end' }">
+      <template #footer>
+        <UButton color="neutral" variant="ghost" label="Cancel" @click="deleteOpen = false" />
+        <UButton color="error" icon="i-heroicons-trash" label="Move to trash" @click="deleteProject" />
       </template>
     </UModal>
   </div>

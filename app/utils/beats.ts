@@ -1,12 +1,15 @@
 // Offline music analysis: tempo, beat grid, downbeats (bar starts) and phrase starts (8-bar sections).
 // All returned times are in track milliseconds.
 
+export interface MusicSection { start: number, end: number, label: string, energy: number }
+
 export interface BeatAnalysis {
   duration: number
   bpm: number
   beats: number[]
   downbeats: number[]
   phrases: number[]
+  sections: MusicSection[]
   peaks: number[]
 }
 
@@ -214,6 +217,8 @@ export async function analyzeAudio(buf: ArrayBuffer, onProgress?: (p: number) =>
   const phrases: number[] = []
   for (let j = pOff; j < downbeats.length; j += 8) phrases.push(downbeats[j]!)
 
+  const sections = detectSections(downIdx.map(k => beatFrames[k]!), frames, rms, onset, lowOnset, pOff, downbeats, Math.round(duration * 1000))
+
   // Waveform peaks for the timeline (roughly 20 per second).
   const peakCount = Math.min(6000, Math.max(200, Math.round(duration * 20)))
   const per = samples.length / peakCount
@@ -231,7 +236,71 @@ export async function analyzeAudio(buf: ArrayBuffer, onProgress?: (p: number) =>
   return {
     duration: Math.round(duration * 1000),
     bpm: Math.round(60 * fps / period * 100) / 100,
-    beats, downbeats, phrases,
+    beats, downbeats, phrases, sections,
     peaks: peaks.map(p => Math.round(p / maxPeak * 100) / 100)
   }
+}
+
+// Sections: bars are described by loudness, busyness (onsets) and bass; boundaries go where the next four bars
+// differ most from the previous four, preferring phrase-aligned bars. Each section is labelled by its energy
+// relative to the rest of the track and what comes next (a mid section before a high one is a build).
+function detectSections(barFrames: number[], frames: number, rms: Float32Array, onset: Float32Array, low: Float32Array, phraseOffset: number, downbeats: number[], durationMs: number): MusicSection[] {
+  const nb = barFrames.length
+  if (nb < 8) return nb ? [{ start: downbeats[0] ?? 0, end: durationMs, label: 'verse', energy: 0.5 }] : []
+  const feat = barFrames.map((f, b) => {
+    const from = Math.round(f), to = Math.round(barFrames[b + 1] ?? frames)
+    let e = 0, d = 0, l = 0
+    for (let i = from; i < Math.max(from + 1, to); i++) { e += rms[i] ?? 0; d += onset[i] ?? 0; l += low[i] ?? 0 }
+    const n = Math.max(1, to - from)
+    return [e / n, d / n, l / n]
+  })
+  // z-score each feature so none dominates.
+  for (let k = 0; k < 3; k++) {
+    const vals = feat.map(f => f[k]!)
+    const mean = vals.reduce((a, v) => a + v, 0) / nb
+    const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) ** 2, 0) / nb) || 1
+    feat.forEach(f => (f[k] = (f[k]! - mean) / sd))
+  }
+  const avg = (a: number, b: number) => [0, 1, 2].map(k => {
+    let s = 0
+    for (let i = a; i < b; i++) s += feat[i]![k]!
+    return s / Math.max(1, b - a)
+  })
+  const W = 4
+  const nov = feat.map((_, b) => {
+    if (b < W || b > nb - W) return 0
+    const x = avg(b - W, b), y = avg(b, b + W)
+    const dist = Math.hypot(x[0]! - y[0]!, x[1]! - y[1]!, x[2]! - y[2]!)
+    return dist * ((b - phraseOffset) % 4 === 0 ? 1.25 : 1)
+  })
+  const m = nov.reduce((a, v) => a + v, 0) / nb
+  const sd = Math.sqrt(nov.reduce((a, v) => a + (v - m) ** 2, 0) / nb)
+  const bounds = [0]
+  for (let b = W; b <= nb - W; b++) {
+    const peak = nov[b]! >= (nov[b - 1] ?? 0) && nov[b]! >= (nov[b + 1] ?? 0) && nov[b]! > m + 0.5 * sd
+    if (peak && b - bounds.at(-1)! >= 4) bounds.push(b)
+  }
+
+  // Energy per section, scaled 0..1 across the track.
+  const loud = feat.map(f => f[0]! * 0.6 + f[1]! * 0.25 + f[2]! * 0.15)
+  const segs = bounds.map((b, i) => {
+    const e = bounds[i + 1] ?? nb
+    let s = 0
+    for (let k = b; k < e; k++) s += loud[k]!
+    return { from: b, to: e, raw: s / Math.max(1, e - b) }
+  })
+  const lo = Math.min(...segs.map(s => s.raw)), hi = Math.max(...segs.map(s => s.raw))
+  const norm = (v: number) => hi - lo < 1e-6 ? 0.5 : (v - lo) / (hi - lo)
+
+  return segs.map((s, i) => {
+    const energy = Math.round(norm(s.raw) * 100) / 100
+    const next = segs[i + 1] ? norm(segs[i + 1]!.raw) : null
+    let label = 'verse'
+    if (i === 0 && energy < 0.45) label = 'intro'
+    else if (i === segs.length - 1 && energy < 0.55 && segs.length > 1) label = 'outro'
+    else if (energy >= 0.7) label = 'drop'
+    else if (energy < 0.35) label = 'breakdown'
+    else if (next !== null && next >= 0.7 && next - energy > 0.2) label = 'build'
+    return { start: downbeats[s.from] ?? 0, end: s.to < nb ? downbeats[s.to]! : durationMs, label, energy }
+  })
 }

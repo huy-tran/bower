@@ -1,5 +1,14 @@
-export interface ChatMessage { role: 'user' | 'assistant' | 'error', text: string, at: string, durationMs?: number, costUsd?: number }
-export interface ChatJob { status: 'running' | 'done' | 'error', prompt: string, startedAt: number, activity: string[] }
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'error'
+  text: string
+  at: string
+  durationMs?: number
+  costUsd?: number
+  attachments?: string[]
+  model?: string
+}
+export interface ChatJob { status: 'running' | 'done' | 'error', prompt: string, startedAt: number, activity: string[], partial: string }
+export interface SendOptions { model?: string, attachments?: string[], at?: number }
 interface Thread { messages: ChatMessage[], job: ChatJob | null, loaded: boolean }
 
 const threads = reactive(new Map<string, Thread>())
@@ -24,16 +33,17 @@ async function load(pid: string, key: string) {
   else if (wasRunning) await useEditor().refresh()
 }
 
+// Poll quickly while Claude writes so the streamed reply feels live.
 function schedule(pid: string, key: string) {
   const k = tkey(pid, key)
   clearTimeout(timers.get(k))
-  timers.set(k, setTimeout(() => load(pid, key).catch(() => schedule(pid, key)), 1000))
+  timers.set(k, setTimeout(() => load(pid, key).catch(() => schedule(pid, key)), 600))
 }
 
-async function send(pid: string, key: string, message: string) {
+async function send(pid: string, key: string, message: string, opts: SendOptions = {}) {
   const t = thread(pid, key)
-  t.messages.push({ role: 'user', text: message, at: new Date().toISOString() })
-  const res = await $fetch<{ job: ChatJob }>(`/api/projects/${pid}/chat/${key}`, { method: 'POST', body: { message } })
+  t.messages.push({ role: 'user', text: message, at: new Date().toISOString(), attachments: opts.attachments })
+  const res = await $fetch<{ job: ChatJob }>(`/api/projects/${pid}/chat/${key}`, { method: 'POST', body: { message, ...opts } })
   t.job = res.job
   schedule(pid, key)
 }
@@ -52,6 +62,12 @@ function isBusy(pid: string, key: string) {
   return threads.get(tkey(pid, key))?.job?.status === 'running'
 }
 
+// Attachments queued from elsewhere (for example an app screenshot from the settings); the chat panel picks them up.
+const queuedAttachments = ref<{ path: string, url: string, name: string }[]>([])
+function queueAttachment(a: { path: string, url: string, name: string }) {
+  if (!queuedAttachments.value.some(x => x.path === a.path)) queuedAttachments.value = [...queuedAttachments.value, a]
+}
+
 export function useChat() {
-  return { thread, load, send, clear, cancel, isBusy }
+  return { thread, load, send, clear, cancel, isBusy, queuedAttachments, queueAttachment }
 }

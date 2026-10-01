@@ -1,5 +1,51 @@
+// Nuxt UI theme: "Parchment" preset from ui.nuxt.com/theme (colours and tokens live in main.css).
 export default defineAppConfig({
   ui: {
-    colors: { primary: 'blue', neutral: 'zinc' }
+    colors: { primary: 'clay', neutral: 'parchment' },
+    icons: {
+      arrowDown: 'i-heroicons-arrow-down',
+      arrowLeft: 'i-heroicons-arrow-left',
+      arrowRight: 'i-heroicons-arrow-right',
+      arrowUp: 'i-heroicons-arrow-up',
+      caution: 'i-heroicons-exclamation-circle',
+      check: 'i-heroicons-check',
+      chevronDoubleLeft: 'i-heroicons-chevron-double-left',
+      chevronDoubleRight: 'i-heroicons-chevron-double-right',
+      chevronDown: 'i-heroicons-chevron-down',
+      chevronLeft: 'i-heroicons-chevron-left',
+      chevronRight: 'i-heroicons-chevron-right',
+      chevronUp: 'i-heroicons-chevron-up',
+      close: 'i-heroicons-x-mark',
+      copy: 'i-heroicons-clipboard',
+      copyCheck: 'i-heroicons-clipboard-document-check',
+      dark: 'i-heroicons-moon',
+      drag: 'i-heroicons-bars-3',
+      ellipsis: 'i-heroicons-ellipsis-horizontal',
+      error: 'i-heroicons-x-circle',
+      external: 'i-heroicons-arrow-up-right',
+      eye: 'i-heroicons-eye',
+      eyeOff: 'i-heroicons-eye-slash',
+      file: 'i-heroicons-document',
+      folder: 'i-heroicons-folder',
+      folderOpen: 'i-heroicons-folder-open',
+      hash: 'i-heroicons-hashtag',
+      info: 'i-heroicons-information-circle',
+      light: 'i-heroicons-sun',
+      loading: 'i-heroicons-arrow-path',
+      menu: 'i-heroicons-bars-3',
+      minus: 'i-heroicons-minus',
+      panelClose: 'i-heroicons-chevron-left',
+      panelOpen: 'i-heroicons-chevron-right',
+      plus: 'i-heroicons-plus',
+      reload: 'i-heroicons-arrow-uturn-left',
+      search: 'i-heroicons-magnifying-glass',
+      stop: 'i-heroicons-stop',
+      star: 'i-heroicons-star',
+      success: 'i-heroicons-check-circle',
+      system: 'i-heroicons-computer-desktop',
+      tip: 'i-heroicons-light-bulb',
+      upload: 'i-heroicons-arrow-up-tray',
+      warning: 'i-heroicons-exclamation-triangle'
+    }
   }
 })

@@ -3,7 +3,9 @@ import { join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { writeClaudeMd } from './claudeMd'
 
-export const STORAGE = resolve(process.env.STORYBOARD_STORAGE || 'storage/projects')
+import { STORAGE } from './paths'
+
+export interface Section { start: number, end: number, label: string, energy: number }
 
 export interface AudioInfo {
   file: string
@@ -14,8 +16,40 @@ export interface AudioInfo {
   beats: number[]
   downbeats: number[]
   phrases: number[]
+  sections?: Section[]
   peaks?: number[]
+  gain?: number
+  fadeIn?: number
+  fadeOut?: number
+  // Music level (0..1) while a voice-over clip plays.
+  duck?: number
 }
+
+// A sound effect or voice-over placed on the video timeline (start is video ms).
+export interface Clip {
+  id: string
+  kind: 'sfx' | 'voice'
+  file: string
+  name: string
+  start: number
+  duration: number
+  gain: number
+  captions?: Caption[] | null
+  // Set on voice clips generated from a scene's script: the clip follows that scene and is replaced when the script changes.
+  sceneId?: string | null
+  // `spoken` is the text after pronunciation fixes, which is what the audio actually says.
+  source?: { text: string, voice: string, speed: number, spoken?: string } | null
+}
+
+export interface CaptionSettings { burnIn: boolean, position: 'bottom' | 'top', size: number }
+
+// A scene's voice-over script, from the "voice" key of its meta block. The editor generates the speech.
+export interface SceneVoice { text: string, voice?: string, speed?: number }
+// `shortlist`: the voices the user picked while auditioning; shown first in the editor and suggested to Claude.
+// `pronunciations`: words the voice gets wrong and how to say them ("GIF" -> "jif").
+export interface Pronunciation { term: string, sayAs: string }
+export interface Narrator { voice: string, speed: number, shortlist: string[], pronunciations: Pronunciation[] }
+export const DEFAULT_NARRATOR: Narrator = { voice: 'af_heart', speed: 1, shortlist: [], pronunciations: [] }
 
 export interface Project {
   id: string
@@ -24,10 +58,31 @@ export interface Project {
   width: number
   height: number
   fps: number
-  scenes: { id: string, title: string }[]
+  scenes: { id: string, title: string, transition?: Transition | null }[]
   audio: AudioInfo | null
+  clips: Clip[]
+  captions: CaptionSettings
+  brandKitId: string | null
+  visualChecks: boolean
+  // A local code repository Claude may read (via `claude --add-dir`) to base scenes on the real product.
+  // Machine-specific, so it is not exported.
+  codebases: Codebase[]
+  // The running product, for screenshots: its base URL and notes on how to get around it.
+  app: ProductApp | null
+  narrator: Narrator
+  // Virtual folder the project is filed under, like "Clients/Acme" ('' = top level). Storage on disk stays flat.
+  folder: string
   createdAt: string
 }
+
+// "Clients / Acme /" -> "Clients/Acme". Segments are trimmed and capped; slashes inside a name are not allowed.
+export function normalizeFolder(v: unknown) {
+  return String(v ?? '').split('/').map(s => s.trim().replace(/\\/g, '').slice(0, 60)).filter(Boolean).join('/')
+}
+
+// A local repository Claude may read (via `claude --add-dir`), e.g. { label: 'API', path: 'C:\\Users\\me\\Herd\\acme-api' }.
+export interface Codebase { label: string, path: string, notes: string }
+export interface ProductApp { url: string, notes: string }
 
 export interface SceneView {
   id: string
@@ -37,12 +92,24 @@ export interface SceneView {
   duration: number
   start: number
   mtime: number
+  transition: Transition | null
+  voice: SceneVoice | null
+  // What the scene should show, from the storyboard ("brief" in the meta block).
+  brief: string
 }
 
 export interface Version { n: number, at: string, label: string }
 export interface VersionIndex { current: number, items: Version[] }
 
-export interface ChatMessage { role: 'user' | 'assistant' | 'error', text: string, at: string, durationMs?: number, costUsd?: number }
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'error'
+  text: string
+  at: string
+  durationMs?: number
+  costUsd?: number
+  attachments?: string[]
+  model?: string
+}
 export interface Chat { sessionId: string | null, messages: ChatMessage[] }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,80}$/
@@ -58,7 +125,7 @@ export function slugify(s: string) {
 
 export const projectDir = (pid: string) => join(STORAGE, assertId(pid))
 export const sceneFile = (pid: string, sid: string) => join(projectDir(pid), 'scenes', `${assertId(sid)}.html`)
-const metaDir = (pid: string) => join(projectDir(pid), '.storyboard')
+const metaDir = (pid: string) => join(projectDir(pid), '.bower')
 
 async function readJson<T>(file: string, fallback: T): Promise<T> {
   try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return fallback }
@@ -72,11 +139,11 @@ async function writeJson(file: string, data: unknown) {
 export async function listProjects() {
   await fs.mkdir(STORAGE, { recursive: true })
   const dirs = await fs.readdir(STORAGE, { withFileTypes: true })
-  const out: { id: string, name: string, createdAt: string }[] = []
+  const out: { id: string, name: string, folder: string, createdAt: string }[] = []
   for (const d of dirs) {
     if (!d.isDirectory() || !ID.test(d.name)) continue
     const p = await readJson<Project | null>(join(STORAGE, d.name, 'project.json'), null)
-    if (p) out.push({ id: p.id, name: p.name, createdAt: p.createdAt })
+    if (p) out.push({ id: p.id, name: p.name, folder: normalizeFolder(p.folder), createdAt: p.createdAt })
   }
   return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
@@ -84,30 +151,75 @@ export async function listProjects() {
 export async function loadProject(pid: string): Promise<Project> {
   const p = await readJson<Project | null>(join(projectDir(pid), 'project.json'), null)
   if (!p) throw createError({ statusCode: 404, message: 'Project not found' })
-  return { width: 1920, height: 1080, fps: 30, artDirection: '', audio: null, ...p, id: pid }
+  return {
+    width: 1920, height: 1080, fps: 30, artDirection: '', audio: null, clips: [], brandKitId: null, visualChecks: true, app: null,
+    ...p,
+    // Projects saved before multi-repo support had a single `codebase`.
+    codebases: Array.isArray(p.codebases) ? p.codebases : (p as any).codebase?.path ? [{ label: 'Codebase', notes: '', ...(p as any).codebase }] : [],
+    folder: normalizeFolder(p.folder),
+    narrator: { ...DEFAULT_NARRATOR, ...p.narrator },
+    captions: { burnIn: false, position: 'bottom', size: 44, ...p.captions },
+    id: pid
+  }
 }
 
 export async function saveProject(p: Project) {
+  await syncVoiceClips(p)
   await writeJson(join(projectDir(p.id), 'project.json'), p)
   await writeClaudeMd(p)
 }
 
-// Scene duration lives in the scene file's <script type="application/json" id="meta"> block.
-const META_RE = /<script[^>]*id=["']meta["'][^>]*>([\s\S]*?)<\/script>/i
+// Generated voice clips follow their scene: they start where the scene starts and go when the scene or its script goes.
+// (A clip whose script has since changed stays until the editor regenerates it.)
+async function syncVoiceClips(p: Project) {
+  if (!p.clips.some(c => c.sceneId)) return
+  const views = await sceneViews(p)
+  const keep: Clip[] = []
+  for (const c of p.clips) {
+    if (!c.sceneId) { keep.push(c); continue }
+    const s = views.find(v => v.id === c.sceneId)
+    if (!s?.voice) {
+      await fs.rm(join(projectDir(p.id), 'audio', c.file), { force: true }).catch(() => {})
+      continue
+    }
+    keep.push(c.start === s.start ? c : { ...c, start: s.start })
+  }
+  p.clips = keep
+}
 
-export function sceneMeta(html: string): { duration: number } {
+// Scene duration (and the optional voice-over script) live in the scene file's <script type="application/json" id="meta"> block.
+const META_RE = /<script[^>]*id=["']meta["'][^>]*>([\s\S]*?)<\/script>/i
+// Must match VOICES in app/utils/speech.ts.
+export const VOICE_IDS = ['af_heart', 'af_sarah', 'bm_fable']
+const VOICE_ID = { test: (v: string) => VOICE_IDS.includes(v) }
+
+function parseVoice(v: unknown): SceneVoice | null {
+  const o = typeof v === 'string' ? { text: v } : v && typeof v === 'object' ? v as Record<string, unknown> : null
+  const text = String(o?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 2000)
+  if (!text) return null
+  const out: SceneVoice = { text }
+  if (typeof o!.voice === 'string' && VOICE_ID.test(o!.voice)) out.voice = o!.voice
+  const speed = Number(o!.speed)
+  if (Number.isFinite(speed) && speed > 0) out.speed = Math.min(1.3, Math.max(0.7, Math.round(speed * 100) / 100))
+  return out
+}
+
+export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string } {
   const m = html.match(META_RE)
   try {
     const d = m ? JSON.parse(m[1]!) : {}
-    return { duration: Math.max(100, Number(d.duration) || 3000) }
+    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000) }
   } catch {
-    return { duration: 3000 }
+    return { duration: 3000, voice: null, brief: '' }
   }
 }
 
 export function withDuration(html: string, duration: number) {
-  const meta = `<script type="application/json" id="meta">${JSON.stringify({ duration: Math.round(duration) })}</script>`
-  return META_RE.test(html) ? html.replace(META_RE, meta) : `${meta}\n${html}`
+  const m = html.match(META_RE)
+  let rest: Record<string, unknown> = {}
+  try { rest = m ? JSON.parse(m[1]!) : {} } catch {}
+  const meta = `<script type="application/json" id="meta">${JSON.stringify({ ...rest, duration: Math.round(duration) })}</script>`
+  return m ? html.replace(META_RE, meta) : `${meta}\n${html}`
 }
 
 export async function readScene(pid: string, sid: string) {
@@ -124,13 +236,14 @@ export async function sceneViews(p: Project): Promise<SceneView[]> {
   const out: SceneView[] = []
   for (const s of p.scenes) {
     const path = sceneFile(p.id, s.id)
-    let duration = 3000, mtime = 0
+    let duration = 3000, mtime = 0, voice: SceneVoice | null = null, brief = ''
     try {
       const [html, stat] = await Promise.all([fs.readFile(path, 'utf8'), fs.stat(path)])
-      duration = sceneMeta(html).duration
+      ;({ duration, voice, brief } = sceneMeta(html))
       mtime = stat.mtimeMs
     } catch {}
-    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime })
+    const transition = out.length && s.transition && s.transition.type !== 'cut' ? s.transition : null
+    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime, transition, voice, brief })
     start += duration
   }
   return out
@@ -147,8 +260,9 @@ export function newSceneId(title: string) {
   return `${slugify(title).slice(0, 30)}-${randomBytes(2).toString('hex')}`
 }
 
-export function blankScene(title: string, duration = 3000) {
-  return `<script type="application/json" id="meta">{"duration": ${duration}}</script>
+// A placeholder scene: the title, centred. `extra` adds keys to the meta block (a storyboard brief, a voice script).
+export function blankScene(title: string, duration = 3000, extra: Record<string, unknown> = {}) {
+  return `<script type="application/json" id="meta">${JSON.stringify({ duration, ...extra })}</script>
 <style>
   .headline {
     position: absolute; inset: 0; display: grid; place-items: center;
@@ -170,11 +284,13 @@ export function blankScene(title: string, duration = 3000) {
 `
 }
 
-export async function createProject(name: string, scenes?: { title: string, html: string }[]) {
+export async function createProject(name: string, scenes?: { title: string, html: string }[], size?: { width: number, height: number }, folder = '') {
   let id = slugify(name)
   while (existsSync(join(STORAGE, id))) id = `${slugify(name)}-${randomBytes(2).toString('hex')}`
   const p: Project = {
-    id, name, artDirection: '', width: 1920, height: 1080, fps: 30, scenes: [], audio: null, createdAt: new Date().toISOString()
+    id, name, artDirection: '', width: size?.width ?? 1920, height: size?.height ?? 1080, fps: 30, scenes: [], audio: null,
+    clips: [], captions: { burnIn: false, position: 'bottom', size: 44 }, brandKitId: null, visualChecks: true, codebases: [], app: null, narrator: { ...DEFAULT_NARRATOR },
+    folder: normalizeFolder(folder), createdAt: new Date().toISOString()
   }
   for (const s of scenes ?? [{ title: 'Intro', html: blankScene(name) }]) {
     const sid = newSceneId(s.title)
@@ -243,10 +359,16 @@ export function videoBeats(p: Project) {
 export function sceneBeats(p: Project, start: number, duration: number) {
   const vb = videoBeats(p)
   const within = (l: number[]) => l.filter(t => t >= start && t <= start + duration).map(t => Math.round(t - start))
+  const shift = p.audio?.startOffset || 0
+  const sections = (p.audio?.sections ?? [])
+    .map(s => ({ ...s, start: s.start - shift, end: s.end - shift }))
+    .filter(s => s.end > start && s.start < start + duration)
+    .map(s => ({ label: s.label, energy: s.energy, start: Math.round(s.start - start), end: Math.round(s.end - start) }))
   return {
     bpm: vb?.bpm ?? null,
     beats: vb ? within(vb.beats) : [],
     downbeats: vb ? within(vb.downbeats) : [],
-    phrases: vb ? within(vb.phrases) : []
+    phrases: vb ? within(vb.phrases) : [],
+    sections
   }
 }

@@ -1,38 +1,76 @@
 <script setup lang="ts">
-interface Version { n: number, at: string, label: string }
+import type { DropdownMenuItem } from '@nuxt/ui'
 
-const { project, selected, selectedIndex, setProject, select } = useEditor()
+interface Version { n: number, at: string, label: string }
+interface Attachment { path: string, url: string, name: string }
+
+const { project, selected, selectedIndex, setProject, select, time, mode, active } = useEditor()
 const chat = useChat()
 const toast = useToast()
 
 const tab = ref<'scene' | 'project'>('scene')
 const draft = ref('')
-const scroller = ref<HTMLElement>()
+const attachments = ref<Attachment[]>([])
+// Screenshots sent over from Settings, App land here as pending attachments.
+watch(chat.queuedAttachments, (list) => {
+  if (!list.length) return
+  attachments.value = [...attachments.value, ...list.filter(a => !attachments.value.some(x => x.path === a.path))].slice(0, 8)
+  chat.queuedAttachments.value = []
+}, { immediate: true })
+const uploading = ref(false)
+const dragOver = ref(false)
+const fileInput = ref<HTMLInputElement>()
 const versions = ref<{ current: number, items: Version[] }>({ current: 0, items: [] })
-const versionsOpen = ref(false)
 const editingTitle = ref(false)
 const titleDraft = ref('')
 const editingDuration = ref(false)
 const durationDraft = ref('')
+const confirmDelete = ref(false)
+const comparing = ref(false)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval>
+
+const tabs = [{ label: 'Scene', value: 'scene' }, { label: 'Project', value: 'project' }]
+const MODELS = [
+  { label: 'Default model', value: 'default', description: 'Whatever Claude Code uses' },
+  { label: 'Opus', value: 'opus', description: 'Best for building scenes' },
+  { label: 'Sonnet', value: 'sonnet', description: 'Fast, good for tweaks' },
+  { label: 'Haiku', value: 'haiku', description: 'Fastest, simple edits' }
+]
+const model = ref('default')
+try { model.value = localStorage.getItem('bower:model') || 'default' } catch {}
+watch(model, (m) => { try { localStorage.setItem('bower:model', m) } catch {} })
 
 const key = computed(() => tab.value === 'project' ? 'project' : selected.value?.id ?? '')
 const pid = computed(() => project.value?.id ?? '')
 const current = computed(() => pid.value && key.value ? chat.thread(pid.value, key.value) : null)
-const busy = computed(() => current.value?.job?.status === 'running')
+const job = computed(() => current.value?.job?.status === 'running' ? current.value.job : null)
+const busy = computed(() => !!job.value)
 const hasBeats = computed(() => !!project.value?.audio?.beats.length)
 
-watch([pid, key], ([p, k]) => { if (p && k) chat.load(p, k).catch(() => {}) }, { immediate: true })
+// Scene-relative playhead time, for the "at 1.20s" chip and the prompt context.
+const sceneTime = computed(() => {
+  if (!selected.value) return 0
+  if (mode.value === 'scene') return time.value
+  return active.value?.scene.id === selected.value.id ? active.value.t : 0
+})
 
-watch(() => current.value?.messages.length, async () => {
-  await nextTick()
-  scroller.value?.scrollTo({ top: scroller.value.scrollHeight, behavior: 'smooth' })
+// UChatMessages expects AI SDK shaped messages.
+const messages = computed(() => {
+  const list = (current.value?.messages ?? []).map((m, i) => ({
+    id: `${key.value}-${i}`,
+    role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+    parts: [{ type: 'text' as const, text: m.text }],
+    metadata: { error: m.role === 'error', durationMs: m.durationMs, costUsd: m.costUsd, attachments: m.attachments, streaming: false }
+  }))
+  // Claude's reply as it is being written.
+  if (job.value?.partial?.trim()) {
+    list.push({ id: `${key.value}-partial`, role: 'assistant', parts: [{ type: 'text', text: job.value.partial }], metadata: { error: false, durationMs: undefined, costUsd: undefined, attachments: undefined, streaming: true } })
+  }
+  return list
 })
-watch(() => current.value?.job?.activity.length, async () => {
-  await nextTick()
-  scroller.value?.scrollTo({ top: scroller.value.scrollHeight })
-})
+
+watch([pid, key], ([p, k]) => { if (p && k) chat.load(p, k).catch(() => {}) }, { immediate: true })
 
 onMounted(() => { clock = setInterval(() => (now.value = Date.now()), 250) })
 onBeforeUnmount(() => clearInterval(clock))
@@ -41,29 +79,88 @@ function fail(e: any, title: string) {
   toast.add({ title, description: e?.data?.message || e?.message, color: 'error' })
 }
 
+const dictation = useDictation(text => (draft.value = text))
+watch(dictation.error, (e) => { if (e) toast.add({ title: 'Voice input', description: e, color: 'error' }) })
+// Dictation belongs to one thread; switching scene or tab ends it.
+watch(key, () => dictation.stop())
+
 async function send(text?: string) {
+  if (dictation.listening.value) await dictation.stop()
   const msg = (text ?? draft.value).trim()
   if (!msg || busy.value || !key.value) return
-  if (!text) draft.value = ''
+  const files = text ? [] : attachments.value.map(a => a.path)
+  if (!text) {
+    draft.value = ''
+    attachments.value = []
+  }
   try {
-    await chat.send(pid.value, key.value, msg)
+    await chat.send(pid.value, key.value, msg, {
+      model: model.value === 'default' ? undefined : model.value,
+      attachments: files.length ? files : undefined,
+      at: tab.value === 'scene' ? Math.round(sceneTime.value) : undefined
+    })
   } catch (e) {
     fail(e, 'Could not start Claude')
   }
 }
 
-function onKey(e: KeyboardEvent) {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+function insertTime() {
+  const chip = `(at ${(sceneTime.value / 1000).toFixed(2)}s) `
+  draft.value = draft.value && !draft.value.endsWith(' ') ? `${draft.value} ${chip}` : `${draft.value}${chip}`
+}
+
+async function addFiles(files: File[]) {
+  const images = files.filter(f => f.type.startsWith('image/'))
+  if (!images.length) return
+  uploading.value = true
+  try {
+    const form = new FormData()
+    for (const f of images.slice(0, 8)) form.append('file', f)
+    const res = await $fetch<{ files: Attachment[] }>(`/api/projects/${pid.value}/assets`, { method: 'POST', body: form })
+    attachments.value = [...attachments.value, ...res.files].slice(0, 8)
+  } catch (e) {
+    fail(e, 'Could not attach')
+  } finally {
+    uploading.value = false
+  }
+}
+function onPick(e: Event) {
+  addFiles([...((e.target as HTMLInputElement).files ?? [])])
+  ;(e.target as HTMLInputElement).value = ''
+}
+function onDrop(e: DragEvent) {
+  dragOver.value = false
+  const files = [...(e.dataTransfer?.files ?? [])]
+  if (files.some(f => f.type.startsWith('image/'))) {
     e.preventDefault()
-    send()
+    e.stopPropagation()
+    addFiles(files)
+  }
+}
+function onPaste(e: ClipboardEvent) {
+  const files = [...(e.clipboardData?.files ?? [])]
+  if (files.some(f => f.type.startsWith('image/'))) {
+    e.preventDefault()
+    addFiles(files)
   }
 }
 
-async function loadVersions() {
-  if (!selected.value) return
-  versions.value = await $fetch(`/api/projects/${pid.value}/scenes/${selected.value.id}/versions`)
+async function loadVersions(open: boolean) {
+  if (open && selected.value) versions.value = await $fetch(`/api/projects/${pid.value}/scenes/${selected.value.id}/versions`)
 }
-watch(versionsOpen, (o) => { if (o) loadVersions() })
+
+const versionItems = computed<DropdownMenuItem[][]>(() => [
+  versions.value.items.length
+    ? [...versions.value.items].reverse().map(v => ({
+        label: `v${v.n} · ${timeAgo(v.at)}`,
+        description: v.label,
+        icon: v.n === versions.value.current ? 'i-heroicons-check' : 'i-heroicons-clock',
+        color: v.n === versions.value.current ? 'primary' : undefined,
+        onSelect: () => restore(v.n)
+      }))
+    : [{ label: 'No versions yet', disabled: true }],
+  [{ label: 'Compare versions side by side', icon: 'i-heroicons-view-columns', disabled: versions.value.items.length < 2, onSelect: () => (comparing.value = true) }]
+])
 
 async function undo() {
   try {
@@ -73,7 +170,29 @@ async function undo() {
 
 async function restore(n: number) {
   setProject(await $fetch(`/api/projects/${pid.value}/scenes/${selected.value!.id}/versions/${n}/restore`, { method: 'POST' }))
-  versionsOpen.value = false
+  toast.add({ title: `Restored v${n}`, color: 'neutral' })
+}
+
+// Save the selected scene as a reusable template.
+const savingTemplate = ref(false)
+const templateForm = reactive({ open: false, name: '', description: '' })
+function openSaveTemplate() {
+  templateForm.name = selected.value?.title ?? ''
+  templateForm.description = ''
+  templateForm.open = true
+}
+async function saveTemplate() {
+  if (!templateForm.name.trim()) return
+  savingTemplate.value = true
+  try {
+    const t = await $fetch<{ name: string }>(`/api/projects/${pid.value}/scenes/${selected.value!.id}/template`, { method: 'POST', body: { name: templateForm.name, description: templateForm.description } })
+    templateForm.open = false
+    toast.add({ title: `Saved “${t.name}” as a template`, description: 'Insert it in any project from Add scene, then From a template.', color: 'success' })
+  } catch (e) {
+    fail(e, 'Could not save the template')
+  } finally {
+    savingTemplate.value = false
+  }
 }
 
 async function duplicate() {
@@ -83,10 +202,11 @@ async function duplicate() {
 }
 
 async function remove() {
-  const s = selected.value!
-  if (!confirm(`Delete scene "${s.title}"? Its versions and chat are deleted too.`)) return
+  confirmDelete.value = false
+  const title = selected.value!.title
   try {
-    setProject(await $fetch(`/api/projects/${pid.value}/scenes/${s.id}`, { method: 'DELETE' }))
+    setProject(await $fetch(`/api/projects/${pid.value}/scenes/${selected.value!.id}`, { method: 'DELETE' }))
+    toast.add({ title: `"${title}" moved to the trash`, description: 'Restore it from the project menu within 30 days.', color: 'neutral' })
   } catch (e) { fail(e, 'Could not delete scene') }
 }
 
@@ -94,21 +214,21 @@ function openExternal() {
   window.open(frameUrl(pid.value, selected.value!), '_blank')
 }
 
-async function clearChat() {
-  await chat.clear(pid.value, key.value)
-}
-
 function startTitle() {
   titleDraft.value = tab.value === 'project' ? project.value!.name : selected.value!.title
   editingTitle.value = true
 }
 async function saveTitle() {
+  if (!editingTitle.value) return
   editingTitle.value = false
   const t = titleDraft.value.trim()
   if (!t) return
-  if (tab.value === 'project') setProject(await $fetch(`/api/projects/${pid.value}`, { method: 'PATCH', body: { name: t } }))
-  else setProject(await $fetch(`/api/projects/${pid.value}/scenes/${selected.value!.id}`, { method: 'PATCH', body: { title: t } }))
-  if (tab.value === 'project') useEditor().loadProjects()
+  if (tab.value === 'project') {
+    setProject(await $fetch(`/api/projects/${pid.value}`, { method: 'PATCH', body: { name: t } }))
+    useEditor().loadProjects()
+  } else {
+    setProject(await $fetch(`/api/projects/${pid.value}/scenes/${selected.value!.id}`, { method: 'PATCH', body: { title: t } }))
+  }
 }
 
 function startDuration() {
@@ -116,6 +236,7 @@ function startDuration() {
   editingDuration.value = true
 }
 async function saveDuration() {
+  if (!editingDuration.value) return
   editingDuration.value = false
   const ms = Math.round(parseFloat(durationDraft.value) * 1000)
   if (!ms || ms < 100 || ms === selected.value!.duration) return
@@ -125,6 +246,15 @@ async function saveDuration() {
 const placeholder = computed(() => tab.value === 'project'
   ? 'Ask about the whole video, e.g. "Add a closing scene after the logo" or "Make every headline 10% smaller."'
   : 'What should change? e.g. "Hold on the headline a full second longer, then slide the card in from the right."')
+
+const toolIcon = (a: string) => a.startsWith('Looking at frames') || a.startsWith('Viewing') ? 'i-heroicons-photo'
+  : a.startsWith('Checking the cuts') ? 'i-heroicons-scissors'
+    : a.startsWith('Reading') ? 'i-heroicons-document-magnifying-glass'
+      : a.startsWith('Editing') || a.startsWith('Writing') ? 'i-heroicons-pencil-square'
+        : a.startsWith('Searching') ? 'i-heroicons-magnifying-glass'
+          : 'i-heroicons-chat-bubble-left'
+
+const assetUrl = (path: string) => `/api/projects/${pid.value}/files/${path}`
 
 function timeAgo(iso: string) {
   const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
@@ -136,100 +266,194 @@ function timeAgo(iso: string) {
 </script>
 
 <template>
-  <aside v-if="project && selected" class="flex min-h-0 flex-col border-l border-zinc-200 bg-white">
-    <div class="flex items-center gap-3 border-b border-zinc-100 px-4 py-3">
-      <div class="flex rounded-lg bg-zinc-100 p-0.5 text-sm">
-        <button v-for="t in (['scene', 'project'] as const)" :key="t" class="rounded-md px-3 py-1 capitalize transition" :class="tab === t ? 'bg-white font-medium text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'" @click="tab = t">
-          {{ t }}
-        </button>
-      </div>
+  <aside
+    v-if="project && selected"
+    class="relative flex min-h-0 flex-col border-l border-default bg-default"
+    @dragover.prevent="e => e.dataTransfer?.types.includes('Files') && (dragOver = true)"
+    @dragleave="e => !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node) && (dragOver = false)"
+    @drop.capture="onDrop"
+  >
+    <input ref="fileInput" type="file" accept="image/*" multiple class="hidden" @change="onPick">
+    <div class="flex items-center gap-3 border-b border-default px-4 py-3">
+      <UTabs v-model="tab" :items="tabs" :content="false" size="sm" color="neutral" class="w-auto" />
       <UInput v-if="editingTitle" v-model="titleDraft" size="sm" autofocus class="min-w-0 flex-1" @blur="saveTitle" @keydown.enter="saveTitle" @keydown.esc="editingTitle = false" />
-      <button v-else class="min-w-0 flex-1 truncate text-left text-base font-semibold text-zinc-900 hover:text-zinc-600" title="Rename" @click="startTitle">
-        {{ tab === 'project' ? project.name : selected.title }}
-      </button>
+      <UButton
+        v-else
+        color="neutral"
+        variant="ghost"
+        class="min-w-0 flex-1 text-base font-semibold"
+        :label="tab === 'project' ? project.name : selected.title"
+        :ui="{ label: 'truncate' }"
+        title="Rename"
+        @click="startTitle"
+      />
       <template v-if="tab === 'scene'">
         <UInput v-if="editingDuration" v-model="durationDraft" size="xs" autofocus class="w-20" @blur="saveDuration" @keydown.enter="saveDuration" @keydown.esc="editingDuration = false">
-          <template #trailing><span class="text-xs text-zinc-400">s</span></template>
+          <template #trailing><span class="text-xs text-muted">s</span></template>
         </UInput>
-        <button v-else class="font-mono text-sm text-zinc-500 hover:text-zinc-800" title="Change duration" @click="startDuration">{{ fmtSeconds(selected.duration) }}</button>
+        <UButton v-else size="sm" color="neutral" variant="ghost" class="font-mono" :label="fmtSeconds(selected.duration)" title="Change duration" @click="startDuration" />
       </template>
-      <span v-else class="font-mono text-sm text-zinc-500">{{ fmtSeconds(project.duration) }}</span>
+      <UBadge v-else color="neutral" variant="soft" class="font-mono" :label="fmtSeconds(project.duration)" />
     </div>
 
-    <div class="flex items-center gap-1.5 border-b border-zinc-100 px-4 py-2.5">
+    <div class="flex items-center gap-1.5 border-b border-default px-4 py-2.5">
       <template v-if="tab === 'scene'">
-        <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-undo-2" label="Undo" :disabled="busy" @click="undo" />
-        <UPopover v-model:open="versionsOpen" :content="{ align: 'start' }">
-          <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-history" :label="`Versions (${project.versions[selected.id] ?? 0})`" :disabled="busy" />
-          <template #content>
-            <div class="max-h-80 w-80 overflow-y-auto p-1">
-              <button
-                v-for="v in [...versions.items].reverse()"
-                :key="v.n"
-                class="flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-zinc-50"
-                @click="restore(v.n)"
-              >
-                <span class="mt-px font-mono text-xs text-zinc-400">v{{ v.n }}</span>
-                <span class="min-w-0 flex-1">
-                  <span class="line-clamp-2 text-zinc-800">{{ v.label }}</span>
-                  <span class="text-xs text-zinc-400">{{ timeAgo(v.at) }}</span>
-                </span>
-                <UIcon v-if="v.n === versions.current" name="i-lucide-check" class="mt-0.5 size-4 text-blue-500" />
-              </button>
-              <p v-if="!versions.items.length" class="px-2.5 py-2 text-sm text-zinc-400">No versions yet.</p>
-            </div>
-          </template>
-        </UPopover>
-        <UTooltip text="Open scene in a new tab"><UButton size="sm" color="neutral" variant="ghost" icon="i-lucide-external-link" @click="openExternal" /></UTooltip>
-        <UTooltip text="Duplicate scene"><UButton size="sm" color="neutral" variant="ghost" icon="i-lucide-copy" @click="duplicate" /></UTooltip>
-        <UTooltip text="Delete scene"><UButton size="sm" color="error" variant="ghost" icon="i-lucide-trash-2" :disabled="project.scenes.length <= 1" @click="remove" /></UTooltip>
+        <UFieldGroup size="sm">
+          <UButton color="neutral" variant="outline" icon="i-heroicons-arrow-uturn-left" label="Undo" :disabled="busy" @click="undo" />
+          <UDropdownMenu :items="versionItems" :content="{ align: 'start' }" :ui="{ content: 'w-80 max-h-96', itemDescription: 'line-clamp-2' }" @update:open="loadVersions">
+            <UButton color="neutral" variant="outline" icon="i-heroicons-clock" :label="`Versions (${project.versions[selected.id] ?? 0})`" :disabled="busy" />
+          </UDropdownMenu>
+        </UFieldGroup>
+        <UTooltip text="Open scene in a new tab"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-arrow-top-right-on-square" aria-label="Open scene in a new tab" @click="openExternal" /></UTooltip>
+        <UTooltip text="Duplicate scene"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-document-duplicate" aria-label="Duplicate scene" @click="duplicate" /></UTooltip>
+        <UTooltip text="Save as a template to reuse in other projects"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-bookmark" aria-label="Save as template" :disabled="busy" @click="openSaveTemplate" /></UTooltip>
+        <UTooltip text="Delete scene"><UButton size="sm" color="error" variant="ghost" icon="i-heroicons-trash" aria-label="Delete scene" :disabled="project.scenes.length <= 1 || busy" @click="confirmDelete = true" /></UTooltip>
       </template>
-      <span v-else class="text-xs text-zinc-500">Changes can touch any scene, and each changed scene gets a new version.</span>
-      <UButton class="ml-auto" size="sm" color="neutral" variant="ghost" label="Clear chat" :disabled="busy || !current?.messages.length" @click="clearChat" />
+      <span v-else class="text-xs text-muted">Changes can touch any scene, and each changed scene gets a new version.</span>
+      <UButton class="ml-auto" size="sm" color="neutral" variant="ghost" label="Clear chat" :disabled="busy || !messages.length" @click="chat.clear(pid, key)" />
     </div>
 
-    <div ref="scroller" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-      <div v-if="current && !current.messages.length && !busy" class="mt-8 px-4 text-center text-sm text-zinc-400">
-        <UIcon name="i-lucide-sparkles" class="mx-auto mb-2 size-6" />
-        <p v-if="tab === 'scene'">Describe a change to <span class="font-medium text-zinc-600">{{ selected.title }}</span>. Claude edits <code class="text-xs">{{ selected.file }}</code> and the preview reloads when it's done.</p>
-        <p v-else>Ask for changes across the whole video: add, reorder or restyle scenes.</p>
-      </div>
-      <template v-for="(m, i) in current?.messages" :key="i">
-        <div v-if="m.role === 'user'" class="ml-8 rounded-xl bg-zinc-900 px-3.5 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-white">{{ m.text }}</div>
-        <div v-else class="rounded-xl px-3.5 py-3 text-[15px] leading-relaxed whitespace-pre-wrap" :class="m.role === 'error' ? 'bg-red-50 text-red-700' : 'bg-zinc-100 text-zinc-800'">
-          {{ m.text }}
-          <div v-if="m.durationMs" class="mt-1.5 text-xs text-zinc-400">{{ Math.round(m.durationMs / 1000) }}s<template v-if="m.costUsd"> · ${{ m.costUsd.toFixed(2) }}</template></div>
-        </div>
-      </template>
-      <div v-if="busy && current?.job" class="rounded-xl bg-zinc-50 px-3.5 py-3 text-sm ring-1 ring-zinc-100">
-        <div class="mb-1.5 flex items-center gap-2 font-medium text-zinc-700">
-          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-          Claude is working · {{ Math.round((now - current.job.startedAt) / 1000) }}s
-          <UButton class="ml-auto" size="xs" color="neutral" variant="ghost" label="Stop" @click="chat.cancel(pid, key)" />
-        </div>
-        <p v-for="(a, i) in current.job.activity" :key="i" class="truncate font-mono text-xs leading-5 text-zinc-500">{{ a }}</p>
+    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <UEmpty
+        v-if="current && !messages.length && !busy"
+        variant="naked"
+        icon="i-heroicons-sparkles"
+        :title="tab === 'scene' ? `Change ${selected.title}` : 'Change the whole video'"
+        :description="tab === 'scene'
+          ? `Describe what should change. Claude edits ${selected.file}, checks the frames, and the preview reloads when it's done. Drop images here to show it what you mean.`
+          : 'Ask for changes across the whole video: add, reorder or restyle scenes.'"
+        class="mt-6"
+      />
+      <UChatMessages
+        v-else
+        :messages="messages"
+        :status="busy && !job?.partial?.trim() ? 'submitted' : busy ? 'streaming' : 'ready'"
+        :user="{ variant: 'solid', color: 'neutral' }"
+        :assistant="{ variant: 'soft', color: 'neutral' }"
+        :spacing-offset="0"
+        compact
+        :ui="{ root: 'min-h-0' }"
+      >
+        <template #content="{ message }">
+          <div v-if="(message.metadata as any)?.attachments?.length" class="mb-2 flex flex-wrap gap-1.5">
+            <img v-for="a in (message.metadata as any).attachments" :key="a" :src="assetUrl(a)" :alt="a" class="h-14 rounded-sm object-cover ring-1 ring-white/20">
+          </div>
+          <div class="text-[15px] leading-relaxed whitespace-pre-wrap" :class="(message.metadata as any)?.error && 'text-error'">
+            {{ message.parts[0]?.type === 'text' ? message.parts[0].text : '' }}<span v-if="(message.metadata as any)?.streaming" class="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-current align-text-bottom opacity-60" />
+          </div>
+          <p v-if="(message.metadata as any)?.durationMs" class="mt-1.5 text-xs text-dimmed">
+            {{ Math.round((message.metadata as any).durationMs / 1000) }}s<template v-if="(message.metadata as any).costUsd"> · ~${{ (message.metadata as any).costUsd.toFixed(2) }} API-equivalent</template>
+          </p>
+        </template>
+        <template #indicator>
+          <div v-if="job" class="w-full space-y-1.5">
+            <UChatShimmer :text="`Claude is working · ${Math.round((now - job.startedAt) / 1000)}s`" class="text-sm font-medium" />
+            <UChatTool
+              v-for="(a, i) in job.activity"
+              :key="i"
+              :text="a"
+              :icon="toolIcon(a)"
+              :loading="i === job.activity.length - 1"
+              :disabled="true"
+              :ui="{ label: 'truncate font-mono text-xs' }"
+            />
+          </div>
+        </template>
+      </UChatMessages>
+      <div v-if="job?.partial?.trim()" class="mt-2 space-y-1">
+        <UChatTool v-for="(a, i) in job.activity.slice(-2)" :key="i" :text="a" :icon="toolIcon(a)" :loading="i === 1 || job.activity.length === 1" :disabled="true" :ui="{ label: 'truncate font-mono text-xs' }" />
       </div>
     </div>
 
-    <div class="border-t border-zinc-100 p-4">
+    <div class="border-t border-default p-4">
       <div v-if="tab === 'scene' && hasBeats && !busy" class="mb-2 flex flex-wrap gap-1.5">
-        <UButton size="xs" color="neutral" variant="soft" icon="i-lucide-audio-waveform" label="Snap motion to beats" @click="send('Retime this scene so its key motion moments land exactly on the music: big arrivals on downbeats, smaller accents on beats. Keep the choreography and look the same otherwise.')" />
-        <UButton size="xs" color="neutral" variant="soft" icon="i-lucide-scissors" label="Match the next cut" :disabled="selectedIndex >= project.scenes.length - 1" @click="send('Make the last frame of this scene match the first frame of the next scene exactly so the cut is invisible.')" />
+        <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-signal" label="Snap motion to beats" @click="send('Retime this scene so its key motion moments land exactly on the music: big arrivals on downbeats, smaller accents on beats. Keep the choreography and look the same otherwise.')" />
+        <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-scissors" label="Match the next cut" :disabled="selectedIndex >= project.scenes.length - 1" @click="send('Make the last frame of this scene match the first frame of the next scene exactly so the cut is invisible. Run the seam check and keep going until it is under 1%.')" />
       </div>
-      <div class="rounded-xl ring-1 ring-zinc-200 focus-within:ring-2 focus-within:ring-zinc-400">
-        <textarea
-          v-model="draft"
-          rows="3"
-          class="block w-full resize-none rounded-t-xl bg-transparent px-3.5 pt-3 text-[15px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:outline-none"
-          :placeholder="placeholder"
-          :disabled="busy"
-          @keydown="onKey"
-        />
-        <div class="flex items-center px-3 pb-2.5">
-          <span class="text-xs text-zinc-400">Ctrl/⌘ + Enter to send</span>
-          <UButton class="ml-auto" color="neutral" label="Send" :loading="busy" :disabled="!draft.trim()" @click="send()" />
-        </div>
-      </div>
+      <UChatPrompt
+        v-model="draft"
+        :placeholder="dictation.listening.value ? 'Listening… speak your change' : placeholder"
+        :rows="3"
+        :maxrows="10"
+        autoresize
+        variant="subtle"
+        @submit="send()"
+        @paste="onPaste"
+      >
+        <template v-if="attachments.length || uploading" #header>
+          <div class="flex flex-wrap items-center gap-2">
+            <div v-for="(a, i) in attachments" :key="a.path" class="group relative">
+              <img :src="a.url" :alt="a.name" class="h-12 w-16 rounded-sm object-cover ring-1 ring-default">
+              <UButton class="absolute -top-1.5 -right-1.5" size="xs" color="neutral" variant="solid" icon="i-heroicons-x-mark" :ui="{ base: 'rounded-full p-0.5' }" :aria-label="`Remove ${a.name}`" @click="attachments.splice(i, 1)" />
+            </div>
+            <UIcon v-if="uploading" name="i-heroicons-arrow-path" class="size-4 animate-spin text-muted" />
+          </div>
+        </template>
+        <template #footer>
+          <div class="flex min-w-0 items-center gap-0.5">
+            <UTooltip text="Attach reference images (or drop / paste them)">
+              <UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-paper-clip" aria-label="Attach images" :disabled="busy" @click="fileInput?.click()" />
+            </UTooltip>
+            <UTooltip v-if="tab === 'scene'" text="Point at the playhead time">
+              <UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-map-pin" :label="`${(sceneTime / 1000).toFixed(2)}s`" class="font-mono" :disabled="busy" @click="insertTime" />
+            </UTooltip>
+            <USelect v-model="model" :items="MODELS" size="sm" variant="ghost" class="w-32" :ui="{ content: 'min-w-56' }" aria-label="Model" />
+          </div>
+          <span v-if="dictation.listening.value" class="ml-2 flex items-center gap-1.5 truncate text-xs font-medium text-error">
+            <span class="size-2 animate-pulse rounded-full bg-error" /> Listening
+          </span>
+          <UTooltip v-if="dictation.supported" :text="dictation.listening.value ? 'Stop dictation' : 'Dictate with your voice'">
+            <UButton
+              class="ml-auto"
+              :color="dictation.listening.value ? 'error' : 'neutral'"
+              :variant="dictation.listening.value ? 'soft' : 'ghost'"
+              :icon="dictation.listening.value ? 'i-heroicons-stop-circle' : 'i-heroicons-microphone'"
+              :aria-label="dictation.listening.value ? 'Stop dictation' : 'Dictate'"
+              :aria-pressed="dictation.listening.value"
+              :disabled="busy"
+              @click="dictation.toggle(draft)"
+            />
+          </UTooltip>
+          <UChatPromptSubmit :class="!dictation.supported && 'ml-auto'" :status="busy ? 'streaming' : 'ready'" :disabled="!busy && !draft.trim()" @stop="chat.cancel(pid, key)" />
+        </template>
+      </UChatPrompt>
+      <p class="mt-1.5 flex items-center gap-1 text-xs text-dimmed">
+        <UKbd value="enter" size="sm" /> to send · <UKbd value="shift" size="sm" /> <UKbd value="enter" size="sm" /> new line
+      </p>
     </div>
+
+    <div v-if="dragOver" class="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-default/80 backdrop-blur-sm">
+      <UEmpty variant="outline" icon="i-heroicons-photo" title="Drop images to attach" description="Claude will look at them with your next message." class="bg-default" />
+    </div>
+
+    <UModal
+      v-model:open="confirmDelete"
+      :title="`Delete “${selected.title}”?`"
+      description="The scene moves to the trash with its versions and chat. You can restore it from the project menu for 30 days."
+      :ui="{ footer: 'justify-end' }"
+    >
+      <template #footer>
+        <UButton color="neutral" variant="ghost" label="Cancel" @click="confirmDelete = false" />
+        <UButton color="error" icon="i-heroicons-trash" label="Move to trash" @click="remove" />
+      </template>
+    </UModal>
+
+    <CompareModal v-model:open="comparing" :scene="selected" />
+    <UModal v-model:open="templateForm.open" title="Save as template" description="A copy of this scene you can insert into any project. Claude can adapt it to the other project's brand and stage when inserted." :ui="{ footer: 'justify-end' }">
+      <template #body>
+        <div class="space-y-4">
+          <UFormField label="Name">
+            <UInput v-model="templateForm.name" autofocus class="w-full" placeholder="e.g. Lower third" @keydown.enter="saveTemplate" />
+          </UFormField>
+          <UFormField label="Description" hint="Optional">
+            <UTextarea v-model="templateForm.description" :rows="2" autoresize class="w-full" placeholder="e.g. Name and role slide in from the left over a soft bar. Change the two text lines." />
+          </UFormField>
+        </div>
+      </template>
+      <template #footer>
+        <UButton color="neutral" variant="ghost" label="Cancel" @click="templateForm.open = false" />
+        <UButton icon="i-heroicons-bookmark" label="Save template" :loading="savingTemplate" :disabled="!templateForm.name.trim()" @click="saveTemplate" />
+      </template>
+    </UModal>
   </aside>
 </template>

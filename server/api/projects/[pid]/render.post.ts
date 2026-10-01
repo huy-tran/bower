@@ -1,6 +1,7 @@
+// Queue a render. Renders run one at a time across all projects; the response says where this one sits.
 export default defineEventHandler(async (event) => {
   const pid = getRouterParam(event, 'pid')!
-  const body = await readBody<{ fps?: number, sceneId?: string, scale?: number }>(event)
+  const body = await readBody<{ fps?: number, sceneId?: string, scale?: number, format?: RenderFormat }>(event)
   const url = getRequestURL(event)
-  return { job: await startRender(pid, `${url.protocol}//${url.host}`, body) }
+  return enqueueRender(pid, `${url.protocol}//${url.host}`, body)
 })

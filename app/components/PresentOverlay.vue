@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const emit = defineEmits<{ close: [] }>()
-const { project, active, setMode, seek, play, pause, toggle, playing, time, timelineDuration } = useEditor()
+const { project, active, layers, caption, setMode, setLoop, setRate, seek, play, pause, toggle, playing, time, timelineDuration } = useEditor()
 const root = ref<HTMLElement>()
 const idle = ref(false)
 let idleTimer: ReturnType<typeof setTimeout>
@@ -28,6 +28,8 @@ function onFs() {
 
 onMounted(async () => {
   setMode('video')
+  setLoop(null)
+  setRate(1)
   seek(0)
   await root.value?.requestFullscreen().catch(() => {})
   document.addEventListener('fullscreenchange', onFs)
@@ -44,14 +46,21 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="fixed inset-0 z-50 grid place-items-center bg-black" :class="idle && playing && 'cursor-none'" @mousemove="wake" @click="toggle">
-    <div v-if="project && active" class="aspect-video w-full max-h-full max-w-[calc(100vh*16/9)]">
-      <ScenePlayer :project="project" :scenes="project.scenes" :active-id="active.scene.id" :t="active.t" />
+    <div v-if="project && active" class="max-h-full w-full" :style="{ aspectRatio: `${project.width} / ${project.height}`, maxWidth: `calc(100vh * ${project.width} / ${project.height})` }">
+      <ScenePlayer :project="project" :scenes="project.scenes" :layers="layers" :caption="caption" />
     </div>
     <div class="absolute inset-x-0 bottom-0 h-1 bg-white/10 transition-opacity" :class="idle && playing ? 'opacity-0' : 'opacity-100'">
       <div class="h-full bg-white/70" :style="{ width: `${timelineDuration ? time / timelineDuration * 100 : 0}%` }" />
     </div>
-    <button class="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white transition-opacity hover:bg-white/20" :class="idle && playing ? 'opacity-0' : 'opacity-100'" @click.stop="close">
-      <UIcon name="i-lucide-x" class="size-5" />
-    </button>
+    <UButton
+      class="absolute top-4 right-4 rounded-full transition-opacity"
+      :class="idle && playing ? 'opacity-0' : 'opacity-100'"
+      color="neutral"
+      variant="soft"
+      size="lg"
+      icon="i-heroicons-x-mark"
+      aria-label="Exit presentation"
+      @click.stop="close"
+    />
   </div>
 </template>

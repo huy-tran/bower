@@ -63,51 +63,57 @@ async function remove() {
 <template>
   <div>
     <input ref="input" type="file" accept="audio/*" class="hidden" @change="pick">
-    <UButton v-if="!audio" color="neutral" variant="outline" icon="i-lucide-music" label="Add music" :loading="music.analysing.value" @click="input?.click()" />
+    <UButton v-if="!audio" color="neutral" variant="outline" icon="i-heroicons-musical-note" label="Add music" :loading="music.analysing.value" @click="input?.click()" />
     <UPopover v-else v-model:open="open" :content="{ align: 'end', side: 'top' }">
-      <UButton color="neutral" variant="outline" icon="i-lucide-music" :loading="music.analysing.value">
-        <span class="max-w-40 truncate">{{ music.analysing.value ? `Analysing ${Math.round(music.progress.value * 100)}%` : audio.bpm ? `${Math.round(audio.bpm)} BPM` : audio.name }}</span>
-      </UButton>
+      <UButton
+        color="neutral"
+        variant="outline"
+        icon="i-heroicons-musical-note"
+        :loading="music.analysing.value"
+        :label="music.analysing.value ? `Analysing ${Math.round(music.progress.value * 100)}%` : audio.bpm ? `${Math.round(audio.bpm)} BPM` : audio.name"
+        :ui="{ label: 'max-w-40 truncate' }"
+      />
       <template #content>
         <div class="w-80 space-y-4 p-4 text-sm">
           <div>
-            <p class="truncate font-medium text-zinc-900">{{ audio.name }}</p>
-            <p class="text-zinc-500">
+            <p class="truncate font-medium text-highlighted">{{ audio.name }}</p>
+            <p class="text-muted">
               <template v-if="audio.bpm">{{ audio.bpm.toFixed(1) }} BPM · {{ audio.downbeats.length }} bars · {{ audio.phrases.length }} phrases</template>
               <template v-else>Not analysed yet</template>
             </p>
           </div>
 
           <UFormField label="Video starts at" help="Where in the track the first frame begins.">
-            <div class="flex gap-2">
+            <UFieldGroup class="w-full">
               <UInput v-model="offset" type="number" step="0.01" min="0" class="flex-1" @blur="saveOffset" @keydown.enter="saveOffset">
-                <template #trailing><span class="text-xs text-zinc-400">s</span></template>
+                <template #trailing><span class="text-xs text-dimmed">s</span></template>
               </UInput>
               <UButton color="neutral" variant="outline" label="Next downbeat" :disabled="!audio.downbeats.length" @click="startOnDownbeat" />
+            </UFieldGroup>
+          </UFormField>
+
+          <UFormField v-if="audio.beats.length" label="Beat grid">
+            <div class="flex gap-1.5">
+              <UFieldGroup size="xs">
+                <UButton color="neutral" variant="outline" label="-20ms" @click="nudgeGrid(-20)" />
+                <UButton color="neutral" variant="outline" label="+20ms" @click="nudgeGrid(20)" />
+              </UFieldGroup>
+              <UButton size="xs" color="neutral" variant="ghost" icon="i-heroicons-arrow-path" label="Re-analyse" @click="music.analyse()" />
             </div>
           </UFormField>
 
-          <div v-if="audio.beats.length">
-            <p class="mb-1.5 font-medium text-zinc-700">Beat grid</p>
-            <div class="flex gap-1.5">
-              <UButton size="xs" color="neutral" variant="outline" label="-20ms" @click="nudgeGrid(-20)" />
-              <UButton size="xs" color="neutral" variant="outline" label="+20ms" @click="nudgeGrid(20)" />
-              <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-refresh-cw" label="Re-analyse" @click="music.analyse()" />
-            </div>
-          </div>
+          <UFormField v-if="audio.downbeats.length" label="Snap scene cuts to">
+            <UFieldGroup size="xs">
+              <UButton color="neutral" variant="subtle" label="Beats" @click="snap('beats')" />
+              <UButton color="neutral" variant="subtle" label="Downbeats" @click="snap('downbeats')" />
+              <UButton color="neutral" variant="subtle" label="Phrases" @click="snap('phrases')" />
+            </UFieldGroup>
+          </UFormField>
 
-          <div v-if="audio.downbeats.length">
-            <p class="mb-1.5 font-medium text-zinc-700">Snap scene cuts to</p>
-            <div class="flex gap-1.5">
-              <UButton size="xs" color="neutral" variant="soft" label="Beats" @click="snap('beats')" />
-              <UButton size="xs" color="neutral" variant="soft" label="Downbeats" @click="snap('downbeats')" />
-              <UButton size="xs" color="neutral" variant="soft" label="Phrases" @click="snap('phrases')" />
-            </div>
-          </div>
-
-          <div class="flex justify-between border-t border-zinc-100 pt-3">
-            <UButton size="xs" color="neutral" variant="ghost" icon="i-lucide-replace" label="Replace track" @click="input?.click()" />
-            <UButton size="xs" color="error" variant="ghost" icon="i-lucide-trash-2" label="Remove" @click="remove" />
+          <USeparator />
+          <div class="flex justify-between">
+            <UButton size="xs" color="neutral" variant="ghost" icon="i-heroicons-arrow-path-rounded-square" label="Replace track" @click="input?.click()" />
+            <UButton size="xs" color="error" variant="ghost" icon="i-heroicons-trash" label="Remove" @click="remove" />
           </div>
         </div>
       </template>

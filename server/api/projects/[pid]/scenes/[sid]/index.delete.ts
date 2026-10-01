@@ -1,9 +1,6 @@
+// Soft delete: the scene, its versions and its chat move to the project's trash.
 export default defineEventHandler(async (event) => {
-  const p = await loadProject(getRouterParam(event, 'pid')!)
-  const sid = assertId(getRouterParam(event, 'sid'))
-  if (p.scenes.length <= 1) throw createError({ statusCode: 422, message: 'A project needs at least one scene' })
-  p.scenes = p.scenes.filter(s => s.id !== sid)
-  await saveProject(p)
-  await removeSceneData(p.id, sid)
-  return projectView(p.id)
+  const pid = getRouterParam(event, 'pid')!
+  await trashScene(pid, assertId(getRouterParam(event, 'sid')))
+  return projectView(pid)
 })
