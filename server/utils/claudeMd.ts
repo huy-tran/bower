@@ -7,12 +7,16 @@ import type { Project } from './store'
 const BT = '`'
 const code = (s: string) => BT + s + BT
 
-// Helper Claude may run (the only shell command it is allowed): frame snapshots and the seam checker.
+// Helper Claude may run (the only shell command it is allowed): frame snapshots, the seam checker and
+// screenshots of the running product.
 const BOWER_TOOL = `#!/usr/bin/env node
 // Bower helper for Claude. Talks to the running Bower editor, which renders the images.
-//   node bower.mjs snap <sceneId> [ms ...]   PNG snapshots of a scene at the given times (default: 5 across it)
-//   node bower.mjs seam [sceneId]            how much the picture jumps at each cut (or the cuts around one scene)
-//   node bower.mjs shot <page> [size] [full] screenshot of a page of the running product (size: desktop, laptop, tablet, mobile)
+//   node bower.mjs snap <sceneId> [ms ...]           PNG snapshots of a scene at the given times (default: 5 across it)
+//   node bower.mjs seam [sceneId]                    how much the picture jumps at each cut (or the cuts around one scene)
+//   node bower.mjs shot <page> [size] [full] [steps] screenshot of a page of the running product (size: desktop, laptop, tablet, mobile)
+//       steps: a JSON array of actions to run first, or @file.json holding one, for example
+//       '[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' (see "The running product" in CLAUDE.md)
+import { readFileSync } from 'node:fs'
 const base = process.env.BOWER_URL, pid = process.env.BOWER_PROJECT
 const [cmd, ...args] = process.argv.slice(2)
 if (!base || !pid) { console.error('This helper only works inside the Bower editor (BOWER_URL is not set).'); process.exit(1) }
@@ -25,10 +29,15 @@ async function call(path, init = {}) {
 }
 try {
   if (cmd === 'shot' && args[0]) {
+    // Git Bash on Windows rewrites an argument like /contacts into C:/Program Files/Git/contacts. Undo that.
+    const msys = (process.env.EXEPATH || '').replace(/\\\\/g, '/').replace(/\\/((usr|mingw64)\\/)?(bin|cmd)\\/?$/, '')
+    if (msys && args[0].replace(/\\\\/g, '/').toLowerCase().startsWith(msys.toLowerCase() + '/')) args[0] = args[0].replace(/\\\\/g, '/').slice(msys.length)
     const size = args.find(a => ['desktop', 'laptop', 'tablet', 'mobile'].includes(a))
-    const j = await call('/api/projects/' + pid + '/app/shots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, fullPage: args.includes('full') }) })
-    console.log(j.path + '  (' + j.width + 'x' + j.height + (j.fullPage ? ', full page' : '') + (j.title ? ', "' + j.title + '"' : '') + ')')
-    console.log('Read this PNG to see it. To show it inside a scene use the src ' + j.url)
+    const raw = args.slice(1).find(a => a.startsWith('[') || a.startsWith('@'))
+    const steps = raw ? JSON.parse(raw.startsWith('@') ? readFileSync(raw.slice(1), 'utf8') : raw) : undefined
+    const j = await call('/api/projects/' + pid + '/app/shots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, fullPage: args.includes('full'), steps }) })
+    for (const s of j.shots) console.log(s.path + '  (' + s.width + 'x' + s.height + (s.fullPage ? ', full page' : '') + (s.title ? ', "' + s.title + '"' : '') + ')')
+    console.log((j.shots.length > 1 ? 'Read these PNGs to see them. To show one inside a scene use the src /api/projects/' + pid + '/files/<path>' : 'Read this PNG to see it. To show it inside a scene use the src ' + j.shots[0].url))
   } else if (cmd === 'snap' && args[0]) {
     const j = await call('/api/projects/' + pid + '/scenes/' + args[0] + '/snapshots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ times: args.slice(1).map(Number) }) })
     for (const f of j.files) console.log(f.t + 'ms  ' + f.path)
@@ -38,7 +47,7 @@ try {
     if (!j.seams.length) console.log('No cuts to check.')
     for (const s of j.seams) console.log(s.fromTitle + ' -> ' + s.toTitle + ': ' + s.diff.toFixed(2) + '% of pixels differ' + (s.transition ? ' (' + s.transition.type + ' transition)' : ' (hard cut)') + '. Image (last frame | first frame | changed pixels in red): ' + s.path)
   } else {
-    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId]')
+    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId] | node bower.mjs shot <page> [size] [full] [steps]')
   }
 } catch (e) { console.error(String(e.message || e)); process.exit(1) }
 `
@@ -114,12 +123,38 @@ function appSection(p: Project) {
     '',
     `The product is running at ${a.url}, and the user has signed in for you. You can take screenshots of its real screens:`,
     '',
-    `- ${code('node bower.mjs shot <page> [desktop|laptop|tablet|mobile] [full]')} - \`<page>\` is a path like \`/dashboard\` or a full URL.`,
-    '  The default is a 1440x900 desktop viewport at 2x; \`full\` captures the whole page. The PNG lands in \`assets/shots/\`.',
+    `- ${code('node bower.mjs shot <page> [desktop|laptop|tablet|mobile] [full] [steps]')} - \`<page>\` is a path like \`/dashboard\` or a full URL.`,
+    '  The default is a 1440x900 desktop viewport at 2x; \`full\` captures the whole page. PNGs land in \`assets/shots/\`.',
     '- Read the PNG to see it. Use it two ways: as a reference to rebuild the screen in HTML/SVG, or shown directly in a scene',
     `  with \`<img src="/api/projects/${p.id}/files/assets/shots/<name>.png">\` inside a device frame, cropped or zoomed with transforms.`,
     '- Real screenshots beat rebuilt screens for authenticity; rebuilt screens are better when parts must animate separately.',
     '- Take only the screenshots the request needs. Do not screenshot the editor itself.',
+    '',
+    '### Capturing modals, menus and filled forms',
+    '',
+    'Pass steps as a JSON array (in single quotes) and the page is driven through them before the capture. A \`shot\` step saves a',
+    'PNG of the state at that point, so one run can capture several states. Without a \`shot\` step the page is captured at the end.',
+    '',
+    '```',
+    'node bower.mjs shot /contacts \'[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"},{"select":"CSV","in":"Format"},{"shot":"export-csv"}]\'',
+    'node bower.mjs shot /contacts @steps.json     # the same array in a file in this folder, for long sequences',
+    '```',
+    '',
+    'Steps (one verb each; targets are the visible text, or a CSS selector when they start with \`#\`, \`.\`, \`[\` or \`css:\`):',
+    '',
+    '- `{"click": "Export"}` - click the button, link, menu item, tab, row or label with that text. `"nth": 2` picks the second match.',
+    '- `{"type": "Jane Doe", "in": "Name"}` - replace the field\'s content; the field is found by its label, placeholder or name. Add `"enter": true` to submit.',
+    '- `{"select": "Active", "in": "Status"}` - choose an option of a native `<select>` by text or value. For custom dropdowns, click to open, then click the option.',
+    '- `{"hover": "Actions"}`, `{"press": "Escape"}` (any key name: Enter, Tab, ArrowDown...).',
+    '- `{"wait": "Export contacts"}` - wait for text or a selector to appear (`"gone": true` waits for it to disappear, `"timeout"` in ms, default 10000). `{"wait": 800}` pauses.',
+    '- `{"scroll": "Audit log"}`, `{"scroll": 600}` (pixels) or `{"scroll": "bottom"}`.',
+    '- `{"goto": "/settings"}` - open another page in the same run, keeping the session.',
+    '- `{"shot": "export-modal"}` - save a PNG now, named after the label (`"full": true` for the whole page).',
+    '',
+    'Clicks and typing use real mouse and keyboard events, and the run waits for the app to settle after each step, so Livewire',
+    'and Alpine behave as for a person. When a step fails, the error names the step and the reason, lists what is visible, and',
+    'saves a PNG of the page at that point: Read it, adjust the steps and run again. Do not change the app\'s data unless the',
+    'request calls for it: open dialogs and fill forms freely, but cancel rather than save when a real record would be created.',
     '',
     a.notes.trim() ? `How to get around the app:\n\n${a.notes.trim()}\n` : ''
   ].filter(l => l !== undefined).join('\n').replace(/\n{3,}/g, '\n\n') + '\n'

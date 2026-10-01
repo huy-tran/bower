@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import puppeteer, { type Browser } from 'puppeteer'
 import { CHROME_ARGS } from './browser'
 import { showBrowserWindow } from './showWindow'
+import { hasShotStep, installFinder, parseSteps, runSteps, StepError, type Step } from './steps'
 import { loadProject, projectDir, slugify } from './store'
 
 // Screenshots of the running product. Each project keeps its own Chrome profile under .bower/browser, so the
@@ -50,17 +51,23 @@ export async function closeLogin(pid: string) {
   logins.delete(pid)
 }
 
-export interface ShotOptions { target: string, size?: string, width?: number, height?: number, fullPage?: boolean, scale?: number, name?: string }
+export interface ShotOptions { target: string, size?: string, width?: number, height?: number, fullPage?: boolean, scale?: number, name?: string, steps?: Step[] | string }
 
+export interface Shot { name: string, path: string, url: string, page: string, title: string, width: number, height: number, fullPage: boolean, at: string }
+
+// Opens the page, runs the steps (see steps.ts) and saves a PNG for each `shot` step, or one at the end when
+// there is none. A failing step still saves a PNG of where the page got to, so Claude can see what went wrong.
 export async function captureShot(pid: string, opts: ShotOptions) {
   const p = await loadProject(pid)
   if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address in Settings, App first' })
   if (logins.has(pid)) throw createError({ statusCode: 409, message: 'Close the login window first; Chrome cannot use the profile twice at once' })
+  const steps = parseSteps(opts.steps)
   const preset = SHOT_SIZES[opts.size ?? ''] ?? SHOT_SIZES.desktop!
   const width = Math.min(3000, Math.max(320, Math.round(opts.width || preset.width)))
   const height = Math.min(3000, Math.max(320, Math.round(opts.height || preset.height)))
   const scale = opts.scale === 1 ? 1 : 2
-  const url = resolveTarget(p.app.url, opts.target || '/')
+  const resolve = (t: string) => resolveTarget(p.app!.url, t)
+  const url = resolve(opts.target || '/')
   await fs.mkdir(profileDir(pid), { recursive: true })
   await fs.mkdir(shotsDir(pid), { recursive: true })
 
@@ -68,14 +75,35 @@ export async function captureShot(pid: string, opts: ShotOptions) {
   try {
     const page = await browser.newPage()
     await page.setViewport({ width, height, deviceScaleFactor: scale })
+    await installFinder(page)
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 })
     await new Promise(r => setTimeout(r, 600)) // let entrance animations settle
-    const buf = await page.screenshot({ type: 'png', fullPage: !!opts.fullPage })
-    const base = slugify(opts.name || new URL(url).pathname.replace(/\/$/, '') || 'home').slice(0, 40) || 'home'
-    const name = `${base}-${randomBytes(2).toString('hex')}.png`
-    await fs.writeFile(join(shotsDir(pid), name), buf)
-    const title = await page.title().catch(() => '')
-    return { name, path: `assets/shots/${name}`, url: `/api/projects/${pid}/files/assets/shots/${name}`, page: url, title, width, height, fullPage: !!opts.fullPage, at: new Date().toISOString() }
+
+    const shots: Shot[] = []
+    const save = async (label: string, fullPage: boolean) => {
+      const buf = await page.screenshot({ type: 'png', fullPage })
+      const base = slugify(label || new URL(page.url()).pathname.replace(/\/$/, '') || 'home').slice(0, 40) || 'home'
+      const name = `${base}-${randomBytes(2).toString('hex')}.png`
+      await fs.writeFile(join(shotsDir(pid), name), buf)
+      const title = await page.title().catch(() => '')
+      const shot: Shot = { name, path: `assets/shots/${name}`, url: `/api/projects/${pid}/files/assets/shots/${name}`, page: page.url(), title, width, height, fullPage, at: new Date().toISOString() }
+      shots.push(shot)
+      return shot
+    }
+    try {
+      await runSteps(page, steps, { resolve, shot: async (name, full) => { await save(name, full) } })
+    } catch (e) {
+      if (!(e instanceof StepError)) throw e
+      const done = [...shots]
+      const failed = await save(`${slugify(opts.name || 'step')}-failed`, false).catch(() => null)
+      throw createError({
+        statusCode: 422,
+        message: `${e.message.replace(/\.?$/, '.')}${failed ? ` The page at that point: ${failed.path} (Read it to see).` : ''}${done.length ? ` Saved before the failure: ${done.map(s => s.path).join(', ')}.` : ''}`,
+        data: { step: e.index + 1, failed: failed?.path, shots: done }
+      })
+    }
+    if (!hasShotStep(steps)) await save(opts.name || '', !!opts.fullPage)
+    return { shots, page: page.url(), title: shots[shots.length - 1]!.title, width, height, steps: steps.length }
   } finally {
     await browser.close().catch(() => {})
   }

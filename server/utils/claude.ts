@@ -49,7 +49,7 @@ function voiceLine(p: Project, s: { id: string, voice: { text: string } | null }
 }
 
 const appLine = (p: Project) => p.app
-  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full]\` (see "The running product" in CLAUDE.md), Read them, and use them as references or place them in scenes.`
+  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md), Read them, and use them as references or place them in scenes. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms.`
   : ''
 
 const codebaseLine = (p: Project) => p.codebases.length

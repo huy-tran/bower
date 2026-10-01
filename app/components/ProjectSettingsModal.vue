@@ -81,7 +81,7 @@ const appLinked = computed(() => !!project.value?.app)
 const saveApp = () => save({ app: draft.app.url.trim() ? { url: draft.app.url.trim(), notes: draft.app.notes } : null }, 600)
 const loginOpen = ref(false)
 const shots = ref<{ name: string, path: string, url: string, at: string }[]>([])
-const capture = reactive({ target: '/', size: 'desktop', fullPage: false, busy: false })
+const capture = reactive({ target: '/', size: 'desktop', fullPage: false, steps: '', busy: false })
 const sizeItems = [{ label: 'Desktop 1440×900', value: 'desktop' }, { label: 'Laptop 1280×800', value: 'laptop' }, { label: 'Tablet 834×1194', value: 'tablet' }, { label: 'Mobile 390×844', value: 'mobile' }]
 async function loadShots() {
   if (!project.value) return
@@ -109,11 +109,14 @@ async function closeLogin() {
 async function takeShot() {
   capture.busy = true
   try {
-    const shot = await $fetch<any>(`/api/projects/${project.value!.id}/app/shots`, { method: 'POST', body: { target: capture.target, size: capture.size, fullPage: capture.fullPage } })
-    shots.value = [shot, ...shots.value]
-    toast.add({ title: 'Screenshot saved', description: `${shot.path} · ${shot.width}×${shot.height}${shot.fullPage ? ', full page' : ''}`, color: 'success' })
+    const r = await $fetch<{ shots: any[] }>(`/api/projects/${project.value!.id}/app/shots`, { method: 'POST', body: { target: capture.target, size: capture.size, fullPage: capture.fullPage, steps: capture.steps.trim() || undefined } })
+    shots.value = [...r.shots.slice().reverse(), ...shots.value]
+    const one = r.shots.length === 1 ? r.shots[0] : null
+    toast.add({ title: one ? 'Screenshot saved' : `${r.shots.length} screenshots saved`, description: one ? `${one.path} · ${one.width}×${one.height}${one.fullPage ? ', full page' : ''}` : r.shots.map(s => s.name).join(', '), color: 'success' })
   } catch (err: any) {
-    toast.add({ title: 'Could not take the screenshot', description: err?.data?.message || err?.message, color: 'error' })
+    // A failed step saves a PNG of where the page got to; show it with the others so it can be inspected.
+    toast.add({ title: 'Could not take the screenshot', description: err?.data?.message || err?.message, color: 'error', duration: 12000 })
+    if (err?.data?.data?.failed) loadShots()
   } finally {
     capture.busy = false
   }
@@ -355,12 +358,15 @@ function download(format: 'srt' | 'vtt') {
                   <USelect v-model="capture.size" :items="sizeItems" size="sm" class="w-full" />
                 </UFormField>
               </div>
+              <UFormField label="Steps before capturing" size="sm" hint="Optional, JSON">
+                <UTextarea v-model="capture.steps" :rows="2" autoresize size="sm" class="w-full font-mono text-xs" placeholder='[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' />
+              </UFormField>
               <div class="flex items-center justify-between gap-3">
                 <USwitch v-model="capture.fullPage" label="Whole page, not just the first screen" size="sm" />
                 <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen" @click="takeShot" />
               </div>
               <p v-if="loginOpen" class="text-xs text-warning">Close the sign-in window before capturing.</p>
-              <p class="text-xs text-muted">Claude can take its own with <code>node bower.mjs shot &lt;page&gt;</code> while it works on a scene.</p>
+              <p class="text-xs text-muted">Steps drive the page first: click, type, select, wait, scroll, hover, press, goto, and shot to save a PNG along the way. Claude can take its own with <code>node bower.mjs shot &lt;page&gt;</code> while it works on a scene.</p>
             </UCard>
 
             <div v-if="shots.length" class="grid grid-cols-3 gap-3">
