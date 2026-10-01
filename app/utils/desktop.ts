@@ -1,13 +1,13 @@
 // What the desktop app (electron/preload.cjs) offers the page. Undefined in a normal browser.
-export interface DesktopUpdate {
+export interface DesktopUpdateInfo {
   version: string
   state: 'downloading' | 'ready'
 }
 
 interface BowerDesktop {
   pickFolder(title: string, initial?: string): Promise<string | null>
-  updateState(): Promise<DesktopUpdate | null>
-  onUpdate(cb: (update: DesktopUpdate | null) => void): () => void
+  updateState(): Promise<DesktopUpdateInfo | null>
+  onUpdate(cb: (update: DesktopUpdateInfo | null) => void): () => void
   installUpdate(): Promise<void>
 }
 

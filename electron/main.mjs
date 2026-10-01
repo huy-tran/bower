@@ -210,8 +210,8 @@ ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
 })
 
 // Updates come from the GitHub releases (electron-builder.yml, publish). A new version downloads in
-// the background; the header then offers "Restart to update" (app/components/UpdateButton.vue),
-// and if nobody clicks it, it installs when Bower quits.
+// the background; a dialog then offers to restart into it (app/components/DesktopUpdate.vue),
+// and otherwise it installs when Bower quits.
 let update = null // { version, state: 'downloading' | 'ready' }
 const sendUpdate = () => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('bower:update', update))
 
