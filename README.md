@@ -17,6 +17,21 @@ npm run dev        # http://localhost:3000
 
 On first run an example project ("Example: Product teaser") is created in `storage/projects/`.
 
+## Desktop app
+
+Bower also runs as an Electron app. The window shows the same editor, and the Nuxt server runs inside the app on a free `127.0.0.1` port.
+
+```bash
+npm run dev:desktop     # nuxt dev + an Electron window on it
+npm run pack:desktop    # unpacked app in dist-desktop/win-unpacked (quick to try)
+npm run build:desktop   # installer in dist-desktop (Bower-Setup-<version>.exe on Windows)
+```
+
+- The build ships the Nuxt server, ffmpeg and Puppeteer's Chrome. `.puppeteerrc.cjs` keeps that Chrome in `.cache/puppeteer` so it can be packed. `electron/prepare.mjs` stages both before `electron-builder` runs (config in `electron-builder.yml`).
+- Projects live in the app's data folder (`%APPDATA%\Bower\storage` on Windows, `~/Library/Application Support/Bower/storage` on macOS), and the server log in its logs folder.
+- Users still need Claude Code installed and logged in. The app looks for `claude` on the PATH and in the usual install folders. Node is not needed: a `node` shim that runs Electron as Node is added to the end of the PATH for `node bower.mjs`.
+- Build each platform on that platform. Builds are not code-signed yet, so Windows SmartScreen warns on first launch and macOS needs signing and notarization before others can open it.
+
 ## Features
 
 **Working with Claude**

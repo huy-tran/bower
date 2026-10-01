@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { STORAGE } from '../utils/paths'
 import { createProject, listProjects, loadProject, saveProject } from '../utils/store'
 import { purgeOldTrash } from '../utils/trash'
@@ -19,8 +19,8 @@ export default defineNitroPlugin(async () => {
 
   // First run: create an example project so there is something to play with.
   if ((await listProjects()).length) return
-  const dir = resolve('server/seed')
-  const scene = async (title: string, file: string) => ({ title, html: await fs.readFile(join(dir, file), 'utf8') })
+  const seed = useStorage('assets:seed')
+  const scene = async (title: string, file: string) => ({ title, html: Buffer.from((await seed.getItemRaw(file))!).toString('utf8') })
   const p = await createProject('Example: Product teaser', [
     await scene('Meet Acme', 'intro.html'),
     await scene('Anatomy', 'anatomy.html'),

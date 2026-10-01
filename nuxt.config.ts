@@ -11,5 +11,7 @@ export default defineNuxtConfig({
     }
   },
   colorMode: { preference: 'light', fallback: 'light' },
-  icon: { serverBundle: 'local' }
+  icon: { serverBundle: 'local' },
+  // Bundled into the server build so the first-run example works wherever the server runs from.
+  nitro: { serverAssets: [{ baseName: 'seed', dir: 'seed' }] }
 })

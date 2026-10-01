@@ -1,13 +1,19 @@
 {
   "name": "bower",
+  "version": "0.1.0",
+  "description": "A prompt-driven motion graphics editor",
   "private": true,
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "typecheck": "nuxt typecheck"
+    "typecheck": "nuxt typecheck",
+    "dev:desktop": "concurrently -k -n nuxt,electron \"nuxt dev\" \"wait-on http-get://localhost:3000 && electron .\"",
+    "pack:desktop": "nuxt build && node electron/prepare.mjs && electron-builder --dir",
+    "build:desktop": "nuxt build && node electron/prepare.mjs && electron-builder"
   },
   "dependencies": {
     "@iconify-json/heroicons": "^1.2.3",
@@ -26,9 +32,14 @@
     "ffmpeg-static@5.3.0": true,
     "puppeteer@25.12.0": true,
     "esbuild@0.27.7": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "electron@44.5.1": true
   },
   "devDependencies": {
-    "@types/pngjs": "^6.0.5"
+    "@types/pngjs": "^6.0.5",
+    "concurrently": "^10.0.5",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "wait-on": "^9.5.1"
   }
 }

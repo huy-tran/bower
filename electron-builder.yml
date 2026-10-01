@@ -1,0 +1,42 @@
+# Desktop packaging. `npm run pack:desktop` makes an unpacked app to try, `npm run build:desktop`
+# the installer. Both build Nuxt and stage the server and Chrome first (electron/prepare.mjs).
+appId: com.huytran.bower
+productName: Bower
+copyright: Copyright © 2026 Huy Tran
+
+directories:
+  output: dist-desktop
+  buildResources: build
+
+# Only the Electron shell goes in the app archive. Everything the server needs is already in the
+# Nuxt build, so no node_modules are shipped from here.
+files:
+  - electron/main.mjs
+  - package.json
+  - "!node_modules/**"
+npmRebuild: false
+
+extraResources:
+  - from: dist-desktop/stage/server
+    to: server
+  - from: dist-desktop/stage/chrome
+    to: chrome
+
+win:
+  target: nsis
+  icon: build/icon.png
+
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+mac:
+  target: dmg
+  category: public.app-category.video
+  icon: build/icon.png
+
+linux:
+  target: AppImage
+  category: Video
+  icon: build/icon.png
