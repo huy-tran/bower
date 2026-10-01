@@ -1,11 +1,10 @@
-# Builds the desktop app on each OS. A pushed `v*` tag (matching package.json's version) uploads the
-# installers and update files to a draft GitHub release; publishing that draft is what makes
-# installed apps update. A manual run only builds and keeps the installers as workflow artifacts.
+# Builds the Windows desktop app. A pushed `v*` tag (matching package.json's version) uploads the
+# installer and update files to a draft GitHub release; publishing that draft is what makes
+# installed apps update. A manual run only builds and keeps the installer as a workflow artifact.
 #
-# Signing is used when these repository secrets are set, and skipped otherwise:
-#   Windows: WIN_CSC_LINK (base64 .pfx or URL), WIN_CSC_KEY_PASSWORD
-#   macOS:   CSC_LINK (base64 Developer ID .p12), CSC_KEY_PASSWORD,
-#            APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID (notarization)
+# Builds are unsigned (internal tool, Windows team). To sign later, add the repository secrets
+# WIN_CSC_LINK (base64 .pfx or URL) and WIN_CSC_KEY_PASSWORD. electron-builder.yml also has
+# macOS and Linux targets: add macos-latest / ubuntu-latest runners here to build them.
 name: Desktop
 
 on:
@@ -18,11 +17,7 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
 
@@ -31,7 +26,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # Also downloads this OS's ffmpeg and Puppeteer's Chrome (into .cache/puppeteer).
+      # Also downloads ffmpeg and Puppeteer's Chrome (into .cache/puppeteer).
       - run: npm ci
 
       - name: Build
@@ -40,19 +35,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - uses: actions/upload-artifact@v4
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         with:
-          name: bower-${{ runner.os }}
-          path: |
-            dist-desktop/*.exe
-            dist-desktop/*.dmg
-            dist-desktop/*.AppImage
+          name: bower-windows
+          path: dist-desktop/*.exe
           if-no-files-found: error

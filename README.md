@@ -35,21 +35,15 @@ npm run build:desktop   # installer in dist-desktop (Bower-Setup-<version>.exe o
 
 ### Releases and updates
 
-`.github/workflows/desktop.yml` builds on Windows, macOS (Apple silicon) and Linux. To release:
+Bower is an internal tool for a Windows team, so `.github/workflows/desktop.yml` builds the Windows installer only. To release:
 
 1. Bump `version` in `package.json` and commit.
 2. Tag it with the same version and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. CI uploads the installers to a draft GitHub release. Publish the draft. Installed apps download the update in the background and install it when they quit.
+3. CI uploads the installer to a draft GitHub release. Publish the draft. Installed apps download the update in the background and install it when they quit.
 
-Running the workflow by hand builds without releasing and keeps the installers as workflow artifacts.
+Running the workflow by hand builds without releasing and keeps the installer as a workflow artifact.
 
-Signing is skipped until these repository secrets exist. Unsigned, Windows SmartScreen warns on first launch, and macOS blocks the app and cannot auto-update.
-
-| Secret | For |
-| --- | --- |
-| `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Windows code-signing certificate (base64 `.pfx`) and its password |
-| `CSC_LINK`, `CSC_KEY_PASSWORD` | Apple Developer ID Application certificate (base64 `.p12`) and its password |
-| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Apple notarization |
+Builds are not code-signed. On first install Windows SmartScreen shows "Windows protected your PC": click **More info**, then **Run anyway**. Updates install without the prompt. To sign later, add the repository secrets `WIN_CSC_LINK` (base64 `.pfx`) and `WIN_CSC_KEY_PASSWORD`; the workflow picks them up. `electron-builder.yml` also has macOS and Linux targets, ready for when they are needed.
 
 ## Features
 
