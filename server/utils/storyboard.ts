@@ -33,7 +33,8 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
   if (jobs.get(pid)?.status === 'running') return getPlan(pid)!
   const p = await loadProject(pid)
   const views = await sceneViews(p)
-  const seconds = Math.min(600, Math.max(5, Math.round(opts.seconds || 45)))
+  // No target length: Claude sizes the video to the brief.
+  const seconds = opts.seconds ? Math.min(600, Math.max(5, Math.round(opts.seconds))) : 0
   const job: PlanJob = { status: 'running', startedAt: Date.now(), activity: ['Starting Claude…'] }
   jobs.set(pid, job)
 
@@ -43,7 +44,9 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
     '',
     `Brief from the user:\n${brief.trim()}`,
     '',
-    `Target length: about ${seconds} seconds in total. Use between 3 and 12 scenes; most scenes run 3 to 8 seconds.`,
+    seconds
+      ? `Target length: about ${seconds} seconds in total. Use between 3 and 12 scenes; most scenes run 3 to 8 seconds.`
+      : 'The user set no target length: choose the total length that suits the brief and the content. Make it as short as it can be while landing every point, and give each scene the time its content and narration need; most scenes run 3 to 8 seconds. Use between 3 and 16 scenes.',
     opts.narration
       ? 'Include a voice-over line for every scene, written to be spoken, at most 2.5 words per second of that scene. The lines must read as one continuous piece.'
       : 'No voice-over: leave "voice" empty for every scene.',

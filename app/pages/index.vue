@@ -312,9 +312,24 @@ async function copyPath() {
         <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />
         <div class="ml-auto flex items-center gap-2">
           <DesktopUpdate />
-          <UButton v-if="story.state.building" color="info" variant="subtle" size="sm" icon="i-heroicons-arrow-path" :label="`Building ${story.state.done + 1}/${story.state.total} · ${story.state.current}`" :ui="{ leadingIcon: 'animate-spin' }" @click="story.stop()">
-            <template #trailing><UIcon name="i-heroicons-stop" class="size-4" /></template>
-          </UButton>
+          <template v-if="story.state.building && story.state.waiting">
+            <UFieldGroup size="sm">
+              <UBadge color="info" variant="subtle" size="md" icon="i-heroicons-check" :label="`Built ${story.state.done}/${story.state.total} · ${story.state.current}`" />
+              <UButton v-if="story.state.done < story.state.total" color="info" variant="solid" icon="i-heroicons-play" label="Next scene" @click="story.continueBuild()" />
+              <UButton v-if="story.state.done < story.state.total" color="info" variant="subtle" icon="i-heroicons-forward" label="Build the rest" @click="story.continueAll()" />
+              <UButton color="info" variant="subtle" icon="i-heroicons-arrow-path" label="Redo" @click="story.redo()" />
+              <UButton color="info" variant="subtle" icon="i-heroicons-stop" :label="story.state.done < story.state.total ? 'Stop' : 'Done'" @click="story.stop()" />
+            </UFieldGroup>
+          </template>
+          <UFieldGroup v-else-if="story.state.building" size="sm">
+            <UBadge color="info" variant="subtle" size="md" icon="i-heroicons-arrow-path" :label="`Building ${story.state.done + 1}/${story.state.total} · ${story.state.current}`" :ui="{ leadingIcon: 'animate-spin' }" />
+            <UTooltip v-if="story.state.mode === 'all'" text="Finish this scene, then ask before each next one">
+              <UButton color="info" variant="subtle" icon="i-heroicons-pause" label="Pause after this scene" @click="story.pauseAfterScene()" />
+            </UTooltip>
+            <UTooltip text="Cancel Claude now and stop building; what it wrote so far is kept as a version">
+              <UButton color="info" variant="subtle" icon="i-heroicons-stop" label="Stop" @click="story.stopNow()" />
+            </UTooltip>
+          </UFieldGroup>
           <NarrationStatus />
           <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
             <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />

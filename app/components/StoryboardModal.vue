@@ -9,12 +9,18 @@ const story = useStoryboard()
 const toast = useToast()
 
 const step = ref<'brief' | 'plan'>('brief')
-const form = reactive({ brief: '', seconds: 45, narration: true })
+// With no target length (the default) Claude sizes the video to the brief.
+const form = reactive({ brief: '', autoLength: true, seconds: 45, narration: true })
 const planning = ref(false)
 const activity = ref('')
 const scenes = ref<PlanScene[]>([])
 const mode = ref<'replace' | 'append'>('replace')
-const build = ref(true)
+const build = ref<'all' | 'step' | 'none'>('all')
+const buildItems = [
+  { label: 'Build every scene now', description: 'Claude works through the scenes one after another.', value: 'all' },
+  { label: 'Build one scene at a time', description: 'Claude pauses after each scene so you can review it, redo it or stop.', value: 'step' },
+  { label: 'Just create the scenes', description: 'Each scene keeps its brief; build them from their chats when you are ready.', value: 'none' }
+]
 const applying = ref(false)
 
 const total = computed(() => scenes.value.reduce((a, s) => a + s.duration, 0))
@@ -29,7 +35,7 @@ async function plan() {
   activity.value = 'Starting Claude…'
   const pid = project.value!.id
   try {
-    await $fetch(`/api/projects/${pid}/storyboard`, { method: 'POST', body: { brief: form.brief, seconds: form.seconds, narration: form.narration } })
+    await $fetch(`/api/projects/${pid}/storyboard`, { method: 'POST', body: { brief: form.brief, seconds: form.autoLength ? undefined : form.seconds, narration: form.narration } })
     for (;;) {
       await new Promise(r => setTimeout(r, 1500))
       const j = await $fetch<{ status: string, activity: string[], plan?: PlanScene[], error?: string }>(`/api/projects/${pid}/storyboard`)
@@ -65,8 +71,9 @@ async function apply() {
     const res = await $fetch<{ created: string[], project: any }>(`/api/projects/${pid}/storyboard`, { method: 'PUT', body: { scenes: scenes.value, mode: mode.value } })
     ed.setProject(res.project)
     open.value = false
-    toast.add({ title: `${res.created.length} scenes created`, description: build.value ? 'Claude is building them one by one. Watch the scene strip.' : 'Each scene holds its brief. Open a scene and ask Claude to build it.', color: 'success' })
-    if (build.value) story.buildAll(pid, res.created)
+    const note = { all: 'Claude is building them one by one. Watch the scene strip.', step: 'Claude builds the first scene, then asks you in the header before going on.', none: 'Each scene holds its brief. Open a scene and ask Claude to build it.' }
+    toast.add({ title: `${res.created.length} scenes created`, description: note[build.value], color: 'success' })
+    if (build.value !== 'none') story.buildAll(pid, res.created, build.value)
     scenes.value = []
     step.value = 'brief'
   } catch (err: any) {
@@ -85,8 +92,9 @@ async function apply() {
           <UTextarea v-model="form.brief" :rows="7" autoresize class="w-full" placeholder="e.g. A 45-second launch teaser for the new booking flow, aimed at clinic managers. Calm and confident. Show the three steps: pick a slot, confirm the patient, send the reminder. End on the logo and the line “Less admin. More care.”" />
         </UFormField>
         <div class="grid grid-cols-2 gap-4">
-          <UFormField :label="`Target length · ${form.seconds}s`">
-            <USlider v-model="form.seconds" :min="10" :max="180" :step="5" class="mt-2" />
+          <UFormField :label="form.autoLength ? 'Target length' : `Target length · ${form.seconds}s`">
+            <USwitch v-model="form.autoLength" label="Let Claude choose from the brief" />
+            <USlider v-if="!form.autoLength" v-model="form.seconds" :min="10" :max="300" :step="5" class="mt-3" />
           </UFormField>
           <UFormField label="Narration">
             <USwitch v-model="form.narration" label="Write a voice-over line for each scene" />
@@ -122,9 +130,9 @@ async function apply() {
             <p v-if="tooLong(s)" class="text-xs text-warning">About {{ words(s.voice) }} words for {{ fmtSeconds(s.duration, 1) }}: this line will likely run longer than the scene. Shorten it or lengthen the scene.</p>
           </UCard>
         </div>
-        <div class="flex flex-wrap items-center gap-4 border-t border-default pt-3">
-          <URadioGroup v-model="mode" orientation="horizontal" :items="[{ label: 'Replace the current scenes (they go to the trash)', value: 'replace' }, { label: 'Add after the current scenes', value: 'append' }]" />
-          <USwitch v-model="build" label="Have Claude build every scene now" class="ml-auto" />
+        <div class="grid gap-4 border-t border-default pt-3 sm:grid-cols-2">
+          <URadioGroup v-model="mode" legend="Placement" :items="[{ label: 'Replace the current scenes (they go to the trash)', value: 'replace' }, { label: 'Add after the current scenes', value: 'append' }]" />
+          <URadioGroup v-model="build" legend="Building" :items="buildItems" />
         </div>
       </div>
     </template>
@@ -133,7 +141,7 @@ async function apply() {
       <div class="flex gap-2">
         <UButton color="neutral" variant="ghost" label="Cancel" @click="open = false" />
         <UButton v-if="step === 'brief'" icon="i-heroicons-sparkles" label="Plan with Claude" :loading="planning" :disabled="!form.brief.trim()" @click="plan" />
-        <UButton v-else icon="i-heroicons-squares-plus" :label="build ? 'Create and build' : 'Create scenes'" :loading="applying" :disabled="!scenes.length" @click="apply" />
+        <UButton v-else icon="i-heroicons-squares-plus" :label="build === 'none' ? 'Create scenes' : 'Create and build'" :loading="applying" :disabled="!scenes.length" @click="apply" />
       </div>
     </template>
   </UModal>
