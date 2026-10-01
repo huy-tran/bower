@@ -1,0 +1,48 @@
+<script type="application/json" id="meta">{"duration": 3320}</script>
+<style>
+  .st-title { position: absolute; left: 0; right: 0; top: 70px; text-align: center; font: 800 112px/1 Inter, sans-serif; letter-spacing: -0.055em; }
+  .st-grid { position: absolute; left: 260px; top: 320px; width: 1400px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 36px; }
+  .st-cell { height: 280px; border-radius: 26px; display: grid; place-items: center; background: #fafafa; border: 1.5px solid #f0f0f1; }
+  .st-btn { font: 600 30px/1 Inter, sans-serif; padding: 24px 40px; border-radius: 14px; }
+  .v-primary { background: #0a0a0a; color: #fff; }
+  .v-outline { border: 2px solid #d4d4d8; color: #0a0a0a; background: #fff; }
+  .v-ghost { color: #0a0a0a; background: #ececee; }
+  .v-danger { background: #ef4444; color: #fff; }
+  .v-soft { background: #dbeafe; color: #1d4ed8; }
+  .v-pill { background: #0a0a0a; color: #fff; border-radius: 999px; }
+  .v-link { color: #2563eb; text-decoration: underline; text-underline-offset: 8px; }
+  .v-subtle { color: #71717a; border: 2px dashed #d4d4d8; }
+</style>
+<div class="st-title">Every style</div>
+<div class="st-grid">
+  <div class="st-cell"><span class="st-btn v-primary">Save changes</span></div>
+  <div class="st-cell"><span class="st-btn v-outline">Cancel</span></div>
+  <div class="st-cell"><span class="st-btn v-ghost">Ghost</span></div>
+  <div class="st-cell"><span class="st-btn v-danger">Delete</span></div>
+  <div class="st-cell"><span class="st-btn v-soft">Soft</span></div>
+  <div class="st-cell"><span class="st-btn v-pill">Pill</span></div>
+  <div class="st-cell"><span class="st-btn v-link">Learn more</span></div>
+  <div class="st-cell"><span class="st-btn v-subtle">Subtle</span></div>
+</div>
+<script>
+  const title = VE.$('.st-title')
+  const cells = VE.$$('.st-cell')
+
+  VE.scene({
+    render(t) {
+      const tp = VE.progress(t, 0, 600, 'outExpo')
+      title.style.opacity = tp
+      title.style.transform = 'translateY(' + (1 - tp) * 30 + 'px)'
+
+      cells.forEach((el, i) => {
+        // Diagonal wave: order by row + column.
+        const order = (i % 4) + Math.floor(i / 4)
+        const start = VE.snap(VE.stagger(order, 90, 250), 'beats')
+        const p = VE.progress(t, start, 650, 'outBack')
+        const out = VE.progress(t, 2900 + order * 30, 350, 'inCubic')
+        el.style.opacity = VE.clamp(p * 1.4) * (1 - out)
+        el.style.transform = 'translateY(' + ((1 - p) * 60 + out * -30) + 'px) scale(' + (0.92 + p * 0.08) + ')'
+      })
+    }
+  })
+</script>

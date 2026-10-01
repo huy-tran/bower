@@ -1,0 +1,38 @@
+<script type="application/json" id="meta">{"duration": 3200}</script>
+<style>
+  .lg-lockup { position: absolute; left: 0; right: 0; top: 440px; display: flex; justify-content: center; align-items: center; gap: 40px; }
+  .lg-bars { display: flex; align-items: center; gap: 14px; height: 180px; }
+  .lg-bars i { display: block; width: 18px; border-radius: 9px; background: #0a0a0a; }
+  .lg-word { font: 800 190px/1 Inter, sans-serif; letter-spacing: -0.06em; }
+  .lg-url { position: absolute; left: 0; right: 0; top: 720px; text-align: center; font: 500 34px/1 Inter, sans-serif; color: #71717a; }
+</style>
+<div class="lg-lockup">
+  <div class="lg-bars"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="lg-word">flux</div>
+</div>
+<div class="lg-url">fluxui.dev</div>
+<script>
+  const bars = VE.$$('.lg-bars i')
+  const heights = [70, 150, 100, 180, 120]
+  const word = VE.$('.lg-word')
+  const url = VE.$('.lg-url')
+
+  VE.scene({
+    render(t) {
+      bars.forEach((b, i) => {
+        const p = VE.progress(t, VE.stagger(i, 60, 100), 800, 'outExpo')
+        // A gentle equaliser pulse after the bars land.
+        const pulse = Math.sin((t / 1000) * Math.PI * 2 * 1.2 + i * 1.3) * 0.12 * VE.progress(t, 900, 600, 'inOutCubic')
+        b.style.height = Math.max(18, heights[i] * p * (1 + pulse)) + 'px'
+        b.style.opacity = VE.clamp(p * 2)
+      })
+      const wp = VE.progress(t, 350, 900, 'outExpo')
+      word.style.opacity = wp
+      word.style.transform = 'translateX(' + (1 - wp) * -40 + 'px)'
+      word.style.clipPath = 'inset(0 ' + (1 - wp) * 100 + '% 0 0)'
+      const up = VE.progress(t, 1100, 700, 'outQuint')
+      url.style.opacity = up
+      url.style.transform = 'translateY(' + (1 - up) * 20 + 'px)'
+    }
+  })
+</script>

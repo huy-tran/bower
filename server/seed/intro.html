@@ -1,0 +1,44 @@
+<script type="application/json" id="meta">{"duration": 2600}</script>
+<style>
+  .intro-word {
+    position: absolute; left: 0; right: 0; top: 380px; text-align: center;
+    font: 800 220px/1 Inter, sans-serif; letter-spacing: -0.06em; color: #0a0a0a;
+  }
+  .intro-word span { display: inline-block; will-change: transform, opacity; }
+  .intro-tag {
+    position: absolute; left: 0; right: 0; top: 650px; text-align: center;
+    font: 500 40px/1 Inter, sans-serif; letter-spacing: -0.02em; color: #71717a;
+  }
+</style>
+<div class="intro-word"></div>
+<div class="intro-tag">A UI kit for calm, careful interfaces</div>
+<script>
+  const word = VE.$('.intro-word')
+  const tag = VE.$('.intro-tag')
+  const letters = 'Meet Flux'.split('').map(ch => {
+    const s = document.createElement('span')
+    s.textContent = ch === ' ' ? ' ' : ch
+    word.appendChild(s)
+    return s
+  })
+
+  VE.scene({
+    render(t) {
+      letters.forEach((el, i) => {
+        const p = VE.progress(t, VE.stagger(i, 45, 100), 700, 'outExpo')
+        el.style.opacity = p
+        el.style.transform = 'translateY(' + (1 - p) * 90 + 'px) rotate(' + (1 - p) * 6 + 'deg)'
+      })
+      const tp = VE.progress(t, 800, 700, 'outQuint')
+      tag.style.opacity = tp
+      tag.style.transform = 'translateY(' + (1 - tp) * 24 + 'px)'
+
+      // Lift out towards the next scene.
+      const out = VE.progress(t, 2150, 450, 'inCubic')
+      word.style.transform = 'translateY(' + (-out * 60) + 'px)'
+      word.style.filter = 'blur(' + out * 10 + 'px)'
+      word.style.opacity = 1 - out
+      tag.style.opacity = tp * (1 - out)
+    }
+  })
+</script>

@@ -1,0 +1,98 @@
+<script type="application/json" id="meta">{"duration": 3320}</script>
+<style>
+  .an-title { position: absolute; left: 0; right: 0; top: 70px; text-align: center; font: 800 112px/1 Inter, sans-serif; letter-spacing: -0.055em; }
+  .an-scene { position: absolute; left: 560px; top: 330px; width: 800px; height: 560px; perspective: 2400px; }
+  .an-rig { position: absolute; inset: 0; transform-style: preserve-3d; }
+  .an-layer { position: absolute; left: 100px; top: 40px; width: 600px; border-radius: 22px; }
+  .an-surface { height: 470px; background: #f4f4f5; box-shadow: 0 30px 80px rgba(0,0,0,.08); }
+  .an-inset { height: 380px; left: 130px; top: 70px; width: 540px; border: 2px dashed #d4d4d8; border-radius: 16px; }
+  .an-card { background: #fff; padding: 34px 38px; box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 20px 50px rgba(0,0,0,.12); font: 500 22px/1.2 Inter, sans-serif; }
+  .an-card label { display: block; font-weight: 600; font-size: 21px; margin: 0 0 12px; }
+  .an-field { border: 1.5px solid #e4e4e7; border-radius: 10px; padding: 16px 18px; color: #18181b; margin-bottom: 26px; }
+  .an-field.muted { color: #a1a1aa; height: 58px; }
+  .an-actions { display: flex; justify-content: flex-end; gap: 12px; align-items: center; }
+  .an-btn { padding: 13px 22px; border-radius: 10px; font-weight: 600; font-size: 20px; }
+  .an-save { background: #0a0a0a; color: #fff; }
+  .an-footer { position: absolute; left: 150px; top: 408px; font: 500 20px/1 Inter, sans-serif; color: #71717a; }
+  svg.an-lines { position: absolute; inset: 0; overflow: visible; }
+  .an-label { position: absolute; font: 500 26px/1 Inter, sans-serif; color: #27272a; white-space: nowrap; }
+</style>
+
+<div class="an-title">Every part in its place</div>
+<div class="an-scene">
+  <div class="an-rig">
+    <div class="an-layer an-surface" data-z="-120"></div>
+    <div class="an-layer an-inset" data-z="-60"><div class="an-footer">Last saved 2 minutes ago</div></div>
+    <div class="an-layer an-card" data-z="40">
+      <label>Name</label>
+      <div class="an-field">Olivia Martin</div>
+      <label>Bio</label>
+      <div class="an-field muted">A few words about yourself</div>
+      <div class="an-actions"><span class="an-btn">Cancel</span><span class="an-btn an-save">Save</span></div>
+    </div>
+  </div>
+</div>
+<svg class="an-lines" viewBox="0 0 1920 1080"></svg>
+
+<script>
+  const rig = VE.$('.an-rig')
+  const layers = VE.$$('.an-layer')
+  const title = VE.$('.an-title')
+  const svg = VE.$('.an-lines')
+
+  // [label text, label x, label y, anchor x, anchor y, side]
+  const callouts = [
+    ['Header', 520, 400, 760, 440, 'left'],
+    ['Body', 1400, 470, 1180, 520, 'right'],
+    ['Actions', 1430, 760, 1250, 700, 'right'],
+    ['Inset border', 430, 740, 700, 720, 'left'],
+    ['Footer', 560, 860, 800, 800, 'left'],
+    ['Card surface: soft', 680, 1010, 900, 900, 'left']
+  ]
+  const NS = 'http://www.w3.org/2000/svg'
+  const parts = callouts.map(([text, lx, ly, ax, ay, side]) => {
+    const path = document.createElementNS(NS, 'path')
+    const knee = side === 'left' ? lx + 90 : lx - 90
+    path.setAttribute('d', 'M' + (side === 'left' ? lx + 10 : lx - 10) + ' ' + ly + ' L' + knee + ' ' + ly + ' L' + ax + ' ' + ay)
+    path.setAttribute('fill', 'none')
+    path.setAttribute('stroke', '#27272a')
+    path.setAttribute('stroke-width', '1.6')
+    const dot = document.createElementNS(NS, 'circle')
+    dot.setAttribute('cx', ax); dot.setAttribute('cy', ay); dot.setAttribute('r', 6)
+    dot.setAttribute('fill', '#fff'); dot.setAttribute('stroke', '#27272a'); dot.setAttribute('stroke-width', '1.6')
+    svg.append(path, dot)
+    const label = document.createElement('div')
+    label.className = 'an-label'
+    label.textContent = text
+    label.style.top = (ly - 13) + 'px'
+    if (side === 'left') label.style.right = (1920 - lx) + 'px'
+    else label.style.left = lx + 'px'
+    document.getElementById('stage').appendChild(label)
+    const len = path.getTotalLength()
+    path.style.strokeDasharray = len
+    return { path, dot, label, len }
+  })
+
+  VE.scene({
+    render(t) {
+      const tp = VE.progress(t, 0, 600, 'outExpo')
+      title.style.opacity = tp
+      title.style.transform = 'translateY(' + (1 - tp) * 30 + 'px)'
+
+      // Tilt into an exploded isometric view, hold, then settle back flat.
+      const open = VE.progress(t, 300, 900, 'inOutCubic') * (1 - VE.progress(t, 2600, 700, 'inOutCubic'))
+      rig.style.transform = 'rotateX(' + open * 52 + 'deg) rotateZ(' + open * -28 + 'deg) scale(' + (1 - open * 0.06) + ')'
+      layers.forEach(el => {
+        el.style.transform = 'translateZ(' + Number(el.dataset.z) * open * 1.6 + 'px)'
+      })
+
+      parts.forEach((c, i) => {
+        const start = VE.stagger(i, 70, 950)
+        const draw = VE.progress(t, start, 500, 'outCubic') * (1 - VE.progress(t, 2450, 300, 'inCubic'))
+        c.path.style.strokeDashoffset = c.len * (1 - draw)
+        c.dot.style.opacity = VE.progress(t, start, 200, 'linear') * (1 - VE.progress(t, 2450, 300, 'inCubic'))
+        c.label.style.opacity = draw
+      })
+    }
+  })
+</script>
