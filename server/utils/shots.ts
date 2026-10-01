@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import puppeteer, { type Browser } from 'puppeteer'
 import { CHROME_ARGS } from './browser'
+import { showBrowserWindow } from './showWindow'
 import { loadProject, projectDir, slugify } from './store'
 
 // Screenshots of the running product. Each project keeps its own Chrome profile under .bower/browser, so the
@@ -40,6 +41,7 @@ export async function openLogin(pid: string, target?: string) {
   browser.on('disconnected', () => logins.delete(pid))
   const page = (await browser.pages())[0] ?? await browser.newPage()
   await page.goto(resolveTarget(p.app.url, target || ''), { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {})
+  await showBrowserWindow(browser.process()?.pid)
   return { open: true }
 }
 
