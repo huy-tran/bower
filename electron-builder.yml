@@ -8,18 +8,27 @@ directories:
   output: dist-desktop
   buildResources: build
 
-# Only the Electron shell goes in the app archive. Everything the server needs is already in the
-# Nuxt build, so no node_modules are shipped from here.
+# Only the bundled Electron shell goes in the app archive. Everything the server needs is already
+# in the Nuxt build, so no node_modules are shipped from here.
 files:
-  - electron/main.mjs
+  - .desktop-stage/app/**
   - package.json
   - "!node_modules/**"
+extraMetadata:
+  main: .desktop-stage/app/main.cjs
 npmRebuild: false
 
+# Auto-update source, and where CI uploads releases (as a draft, published by hand).
+publish:
+  provider: github
+  owner: huy-tran
+  repo: bower
+  releaseType: draft
+
 extraResources:
-  - from: dist-desktop/stage/server
+  - from: .desktop-stage/server
     to: server
-  - from: dist-desktop/stage/chrome
+  - from: .desktop-stage/chrome
     to: chrome
 
 win:

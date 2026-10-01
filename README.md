@@ -27,10 +27,29 @@ npm run pack:desktop    # unpacked app in dist-desktop/win-unpacked (quick to tr
 npm run build:desktop   # installer in dist-desktop (Bower-Setup-<version>.exe on Windows)
 ```
 
-- The build ships the Nuxt server, ffmpeg and Puppeteer's Chrome. `.puppeteerrc.cjs` keeps that Chrome in `.cache/puppeteer` so it can be packed. `electron/prepare.mjs` stages both before `electron-builder` runs (config in `electron-builder.yml`).
-- Projects live in the app's data folder (`%APPDATA%\Bower\storage` on Windows, `~/Library/Application Support/Bower/storage` on macOS), and the server log in its logs folder.
+- The build ships the Nuxt server, ffmpeg and Puppeteer's Chrome. `.puppeteerrc.cjs` keeps that Chrome in `.cache/puppeteer` so it can be packed. `electron/prepare.mjs` bundles the Electron main process and stages it with the server and Chrome in `.desktop-stage` before `electron-builder` runs (config in `electron-builder.yml`).
+- Projects live in the app's data folder (`%APPDATA%\Bower\storage` on Windows, `~/Library/Application Support/Bower/storage` on macOS). The server and updater logs are in its logs folder. Set `BOWER_USER_DATA` to use another data folder, for example to try a build next to the installed app.
+- The server only answers the app: each launch makes a random token that the window gets as a cookie, and Puppeteer's Chrome and Claude's `bower.mjs` helper send it too. Without the token (`npm run dev`) nothing is checked.
 - Users still need Claude Code installed and logged in. The app looks for `claude` on the PATH and in the usual install folders. Node is not needed: a `node` shim that runs Electron as Node is added to the end of the PATH for `node bower.mjs`.
-- Build each platform on that platform. Builds are not code-signed yet, so Windows SmartScreen warns on first launch and macOS needs signing and notarization before others can open it.
+- **Browse…** for linked codebases uses the native folder dialog.
+
+### Releases and updates
+
+`.github/workflows/desktop.yml` builds on Windows, macOS (Apple silicon) and Linux. To release:
+
+1. Bump `version` in `package.json` and commit.
+2. Tag it with the same version and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. CI uploads the installers to a draft GitHub release. Publish the draft. Installed apps download the update in the background and install it when they quit.
+
+Running the workflow by hand builds without releasing and keeps the installers as workflow artifacts.
+
+Signing is skipped until these repository secrets exist. Unsigned, Windows SmartScreen warns on first launch, and macOS blocks the app and cannot auto-update.
+
+| Secret | For |
+| --- | --- |
+| `WIN_CSC_LINK`, `WIN_CSC_KEY_PASSWORD` | Windows code-signing certificate (base64 `.pfx`) and its password |
+| `CSC_LINK`, `CSC_KEY_PASSWORD` | Apple Developer ID Application certificate (base64 `.p12`) and its password |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | Apple notarization |
 
 ## Features
 

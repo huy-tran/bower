@@ -7,6 +7,7 @@ import puppeteer, { type Browser, type Page } from 'puppeteer'
 import { CHROME_ARGS } from './browser'
 import { audioMix } from './mix'
 import { loadProject, projectDir, sceneViews } from './store'
+import { authorizeBrowser } from './token'
 
 export type RenderFormat = 'mp4' | 'gif' | 'mov'
 
@@ -147,6 +148,7 @@ async function runRender(entry: QueueEntry) {
       await Promise.all(chunks.map(async ([a, b], ci) => {
         const browser = await puppeteer.launch({ headless: true, args: CHROME_ARGS })
         browsers.push(browser)
+        await authorizeBrowser(browser, origin)
         const page: Page = (await browser.pages())[0] ?? await browser.newPage()
         await page.setViewport({ width, height, deviceScaleFactor: 1 })
         const errors: string[] = []

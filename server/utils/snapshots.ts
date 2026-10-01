@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { PNG } from 'pngjs'
 import { withBrowser } from './browser'
 import { loadProject, projectDir, sceneViews, type SceneView } from './store'
+import { authorizeBrowser } from './token'
 
 // Frame snapshots (for Claude to look at its own work) and the seam checker (how much the picture jumps at a cut).
 // Chrome only paints the foreground tab, so all capture work goes through one queue on one page at a time.
@@ -15,6 +16,7 @@ function serial<T>(fn: () => Promise<T>): Promise<T> {
 
 async function capture(origin: string, pid: string, shots: { scene: SceneView, t: number }[], width: number, height: number) {
   return serial(() => withBrowser(async (b) => {
+    await authorizeBrowser(b, origin)
     const page = await b.newPage()
     try {
       await page.setViewport({ width, height, deviceScaleFactor: 1 })

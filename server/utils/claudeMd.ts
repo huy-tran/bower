@@ -16,8 +16,9 @@ const BOWER_TOOL = `#!/usr/bin/env node
 const base = process.env.BOWER_URL, pid = process.env.BOWER_PROJECT
 const [cmd, ...args] = process.argv.slice(2)
 if (!base || !pid) { console.error('This helper only works inside the Bower editor (BOWER_URL is not set).'); process.exit(1) }
-async function call(path, init) {
-  const r = await fetch(base + path, init)
+async function call(path, init = {}) {
+  // The desktop app's server only answers requests carrying its session token.
+  const r = await fetch(base + path, { ...init, headers: { ...init.headers, 'x-bower-token': process.env.BOWER_TOKEN || '' } })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j.message || r.statusText)
   return j

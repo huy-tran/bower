@@ -185,10 +185,15 @@ async function removeRepo(path: string) {
 async function browseFolder() {
   picking.value = true
   try {
-    const r = await $fetch<{ path: string | null }>('/api/pick-folder', { method: 'POST', body: { title: 'Choose the repository folder', initial: newRepo.path.trim() || undefined } })
-    if (r.path) {
-      newRepo.path = r.path
-      newRepo.label ||= r.path.split(/[\\/]/).filter(Boolean).pop() ?? ''
+    const title = 'Choose the repository folder', initial = newRepo.path.trim() || undefined
+    // The desktop app has a native chooser; in a browser the server opens the OS one.
+    const desktop = bowerDesktop()
+    const path = desktop
+      ? await desktop.pickFolder(title, initial)
+      : (await $fetch<{ path: string | null }>('/api/pick-folder', { method: 'POST', body: { title, initial } })).path
+    if (path) {
+      newRepo.path = path
+      newRepo.label ||= path.split(/[\\/]/).filter(Boolean).pop() ?? ''
     }
   } catch (err: any) {
     toast.add({ title: 'Could not open the folder chooser', description: err?.data?.message || err?.message, color: 'error' })

@@ -1,18 +1,27 @@
 import { execFileSync, spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import updater from 'electron-updater'
 
 // Bower's desktop shell. Packaged, it starts the bundled Nuxt server on a free localhost port
 // (run by Electron's own Node) and opens a window on it. In development (`npm run dev:desktop`)
 // it only opens a window on the `nuxt dev` server.
 const DEV_URL = process.env.BOWER_DEV_URL || 'http://localhost:3000'
+// Only this app's window (via a cookie), its Chrome and Claude's helper get the token; the server
+// refuses everything else (server/middleware/token.ts). New on every launch.
+const TOKEN = randomBytes(32).toString('hex')
 let server = null
 let quitting = false
 
-if (!app.requestSingleInstanceLock()) app.quit()
+// A separate data folder (and with it a separate single-instance lock), e.g. to test a build
+// next to the installed app.
+if (process.env.BOWER_USER_DATA) app.setPath('userData', process.env.BOWER_USER_DATA)
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.quit()
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -92,6 +101,7 @@ async function startServer() {
     NITRO_HOST: '127.0.0.1',
     NITRO_PORT: String(port),
     BOWER_STORAGE: join(app.getPath('userData'), 'storage', 'projects'),
+    BOWER_TOKEN: TOKEN,
     PATH: [path, nodeShim()].join(delimiter)
   }
   const claude = process.env.CLAUDE_BIN || findClaude(path)
@@ -117,7 +127,10 @@ async function startServer() {
   for (let i = 0; i < 300; i++) {
     if (!server) throw new Error('The server exited while starting')
     try {
-      if ((await fetch(url)).ok) return url
+      if ((await fetch(url, { headers: { 'x-bower-token': TOKEN } })).ok) {
+        await session.defaultSession.cookies.set({ url, name: 'bower_token', value: TOKEN, httpOnly: true, sameSite: 'strict' })
+        return url
+      }
     } catch {}
     await new Promise(r => setTimeout(r, 100))
   }
@@ -133,10 +146,10 @@ function createWindow(url) {
     title: 'Bower',
     backgroundColor: '#ffffff',
     show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false }
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(import.meta.dirname, 'preload.cjs') }
   })
-  const origin = new URL(url).origin
-  const own = (u) => { try { return new URL(u).origin === origin } catch { return false } }
+  const origin = appOrigin = new URL(url).origin
+  const own =(u) => { try { return new URL(u).origin === origin } catch { return false } }
 
   // Bower's own pages (player preview, scene frames) open in a new window, downloads are saved
   // without leaving a blank window behind, and anything else goes to the default browser.
@@ -161,6 +174,31 @@ function createWindow(url) {
   return win
 }
 
+// Native folder chooser for "Browse..." (linked codebases). Only Bower's own pages may ask.
+let appOrigin = null
+ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
+  if (new URL(e.senderFrame.url).origin !== appOrigin) return null
+  const win = BrowserWindow.fromWebContents(e.sender)
+  const r = await dialog.showOpenDialog(win, {
+    title: typeof title === 'string' ? title.slice(0, 120) : 'Choose a folder',
+    defaultPath: typeof initial === 'string' && existsSync(initial) ? initial : undefined,
+    properties: ['openDirectory']
+  })
+  return r.canceled ? null : r.filePaths[0] ?? null
+})
+
+// Updates come from the GitHub releases (electron-builder.yml, publish). A new version downloads in
+// the background, the OS shows a notification, and it installs when Bower quits.
+function checkForUpdates() {
+  const log = createWriteStream(join(app.getPath('logs'), 'updater.log'), { flags: 'a' })
+  const write = level => (...a) => log.write(`${new Date().toISOString()} ${level} ${a.join(' ')}\n`)
+  const { autoUpdater } = updater
+  autoUpdater.logger = { info: write('info'), warn: write('warn'), error: write('error'), debug: () => {} }
+  const check = () => autoUpdater.checkForUpdatesAndNotify().catch(e => write('error')(e?.message ?? e))
+  check()
+  setInterval(check, 6 * 60 * 60 * 1000).unref()
+}
+
 app.on('second-instance', () => {
   const [win] = BrowserWindow.getAllWindows()
   if (win) {
@@ -177,8 +215,10 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => app.quit())
 
 app.whenReady().then(async () => {
+  if (!primary) return // another Bower is open; the second-instance event focuses it
   try {
     createWindow(app.isPackaged ? await startServer() : DEV_URL)
+    if (app.isPackaged) checkForUpdates()
   } catch (e) {
     dialog.showErrorBox('Bower could not start', `${e.message}\n\nDetails are in:\n${join(app.getPath('logs'), 'server.log')}`)
     app.quit()
