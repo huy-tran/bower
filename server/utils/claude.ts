@@ -133,8 +133,12 @@ async function reconcile(pid: string, before: Awaited<ReturnType<typeof snapshot
   }
   const prev = JSON.parse(before.project) as Project
   const prevScenes = new Map(prev.scenes.map(s => [s.id, s]))
+  // `prev` is project.json as stored, which holds the shared app only by id: carry the loaded app over so the
+  // project keeps its app and CLAUDE.md keeps its app section (saveProject also keeps a bare appId).
+  const sameApp = p.app && p.app.id === (prev as Project & { appId?: string }).appId
   p = {
     ...prev,
+    ...(sameApp && { app: p.app, appCodebases: p.appCodebases }),
     scenes: p.scenes
       .filter(s => s && typeof s.id === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(s.id))
       .map(s => ({ id: s.id, title: String(s.title || s.id), transition: prevScenes.get(s.id)?.transition ?? null }))

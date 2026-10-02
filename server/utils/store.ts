@@ -190,8 +190,14 @@ export async function loadProject(pid: string): Promise<Project> {
 export async function saveProject(p: Project) {
   await syncVoiceClips(p)
   // The shared app is stored by reference: its id and how this project shows it.
-  const { app, appCodebases, ...rest } = p
-  await writeJson(join(projectDir(p.id), 'project.json'), { ...rest, appId: app?.id ?? null, appMode: app?.mode ?? null })
+  // A project rebuilt from project.json as stored (after a Claude chat, say) has no `app` filled in, only its
+  // appId: keep that link rather than saving it as "no app".
+  const { app, appCodebases, ...rest } = p as Project & { appId?: string | null, appMode?: AppMode | null }
+  const appId = app === undefined ? rest.appId ?? null : app?.id ?? null
+  const appMode = app === undefined ? rest.appMode ?? null : app?.mode ?? null
+  delete rest.appId
+  delete rest.appMode
+  await writeJson(join(projectDir(p.id), 'project.json'), { ...rest, appId, appMode })
   await writeClaudeMd(p)
 }
 
