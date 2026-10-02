@@ -250,6 +250,7 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => {
   const names = new Map(projects.value.map(p => [p.id, p]))
   const recent = ed.recentIds.value.filter(id => id !== project.value?.id && names.has(id)).slice(0, 6)
   return [[
+    { label: 'Command palette…', icon: 'i-heroicons-command-line', kbds: ['meta', 'k'], onSelect: () => { paletteOpen.value = true } },
     { label: 'New project…', icon: 'i-heroicons-plus', onSelect: openNew },
     { label: 'Import project…', icon: 'i-heroicons-arrow-up-tray', onSelect: () => importInput.value?.click() }
   ], [
@@ -273,6 +274,69 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => {
 
 // The open project's menu, on its name in the toolbar.
 const projectCrumbs = computed(() => project.value?.folder ? project.value.folder.split('/') : [])
+// The command palette (Ctrl+K): the same actions as the toolbar and menus, plus jumping to a scene, a project or a
+// settings tab. Each entry's `run` is what the matching button does.
+const paletteOpen = ref(false)
+defineShortcuts({ meta_k: { usingInput: true, handler: () => { paletteOpen.value = !paletteOpen.value } } })
+const paletteGroups = computed(() => {
+  const p = project.value
+  type Entry = { id: string, label: string, icon?: string, suffix?: string, kbds?: string[], keywords?: string, run: () => void }
+  const groups: { id: string, label: string, items: Entry[] }[] = []
+  const actions: Entry[] = []
+  if (p) {
+    actions.push(
+      mainTab.value === 'scenes'
+        ? { id: 'render', label: 'Render the video', icon: 'i-heroicons-film', keywords: 'export mp4 gif', run: () => { mainTab.value = 'render' } }
+        : { id: 'scenes', label: 'Back to scenes', icon: 'i-heroicons-arrow-left', run: () => { mainTab.value = 'scenes' } },
+      { id: 'play', label: playing.value ? 'Pause' : 'Play', icon: playing.value ? 'i-heroicons-pause' : 'i-heroicons-play', kbds: ['space'], run: () => ed.toggle() },
+      { id: 'present', label: 'Present full screen', icon: 'i-heroicons-arrows-pointing-out', run: () => { presenting.value = true } },
+      { id: 'storyboard', label: 'Storyboard', icon: 'i-heroicons-clipboard-document-list', keywords: 'plan brief', run: () => { storyOpen.value = true } },
+      { id: 'history', label: 'History', icon: 'i-heroicons-clock', keywords: 'undo versions', run: () => { historyOpen.value = true } },
+      { id: 'duplicate', label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', run: duplicateProject },
+      { id: 'export', label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', run: () => { window.location.href = `/api/projects/${p.id}/export` } },
+      { id: 'player', label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', run: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } },
+      { id: 'player-dl', label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', run: () => { window.location.href = `/api/projects/${p.id}/player?download=1` } },
+      { id: 'copy-path', label: 'Copy project folder path', icon: 'i-heroicons-clipboard-document', run: copyProjectPath }
+    )
+    for (const f of ['16:9', '9:16', '1:1', '4:5'].filter(x => x !== formatLabel.value)) {
+      actions.push({ id: `adapt-${f}`, label: `New version for social: ${f}`, icon: 'i-heroicons-device-phone-mobile', keywords: 'reels tiktok shorts square portrait landscape', run: () => adapt(f) })
+    }
+  }
+  actions.push(
+    { id: 'new', label: 'New project', icon: 'i-heroicons-plus', run: openNew },
+    { id: 'import', label: 'Import project', icon: 'i-heroicons-arrow-up-tray', run: () => importInput.value?.click() }
+  )
+  groups.push({ id: 'actions', label: 'Actions', items: actions })
+
+  if (p) {
+    groups.push({
+      id: 'scenes', label: 'Scenes',
+      items: p.scenes.map((s, i) => ({ id: `scene-${s.id}`, label: s.title, suffix: `Scene ${i + 1}`, icon: 'i-heroicons-rectangle-stack', run: () => { mainTab.value = 'scenes'; ed.select(s.id) } }))
+    })
+    const tabs: [SettingsTab, string, string][] = [['general', 'General', 'i-heroicons-adjustments-horizontal'], ['art', 'Art direction', 'i-heroicons-paint-brush'], ['brand', 'Brand kit', 'i-heroicons-swatch'], ['codebase', 'Codebase', 'i-heroicons-code-bracket'], ['app', 'App', 'i-heroicons-window'], ['shots', 'Screenshots', 'i-heroicons-camera'], ['sound', 'Sound', 'i-heroicons-speaker-wave']]
+    groups.push({ id: 'project-settings', label: 'Project settings', items: tabs.map(([tab, label, icon]) => ({ id: `ps-${tab}`, label: `Project settings: ${label}`, icon, run: () => openSettings(tab) })) })
+  }
+
+  const others = projects.value.filter(x => x.id !== p?.id).sort((a, b) => {
+    const ra = ed.recentIds.value.indexOf(a.id), rb = ed.recentIds.value.indexOf(b.id)
+    return (ra < 0 ? 1e9 : ra) - (rb < 0 ? 1e9 : rb) || a.name.localeCompare(b.name)
+  })
+  groups.push({ id: 'projects', label: 'Open a project', items: others.map(x => ({ id: `project-${x.id}`, label: x.name, suffix: x.folder || undefined, icon: 'i-heroicons-film', run: () => ed.openProject(x.id) })) })
+
+  groups.push({
+    id: 'bower', label: 'Bower',
+    items: [
+      { id: 'bs-claude', label: 'Bower settings: Claude Code', icon: 'i-heroicons-sparkles', run: () => bower.show('claude') },
+      { id: 'bs-defaults', label: 'Bower settings: New projects', icon: 'i-heroicons-document-plus', run: () => bower.show('defaults') },
+      { id: 'bs-apps', label: 'Apps', icon: 'i-heroicons-window', run: () => bower.show('apps') },
+      ...THEMES.map(t => ({ id: `theme-${t.value}`, label: `Theme: ${t.label}`, icon: t.icon, keywords: 'dark light appearance', run: () => { colorMode.preference = t.value } })),
+      { id: 'trash', label: 'Trash', icon: 'i-heroicons-archive-box', run: () => { trashOpen.value = true } },
+      { id: 'about', label: 'About Bower', icon: 'i-heroicons-information-circle', keywords: 'version', run: () => { aboutOpen.value = true } }
+    ]
+  })
+  return groups.filter(g => g.items.length)
+})
+
 const projectMenu = computed<DropdownMenuItem[][]>(() => {
   const p = project.value
   if (!p) return []
@@ -505,6 +569,7 @@ async function copyProjectPath() {
     <ProjectSettingsModal v-if="project" v-model:open="settingsOpen" v-model:tab="settingsTab" />
     <BowerSettingsModal />
     <AboutModal v-model:open="aboutOpen" />
+    <CommandPalette v-model:open="paletteOpen" :groups="paletteGroups" />
     <StoryboardModal v-if="project" v-model:open="storyOpen" />
     <HistoryModal v-if="project" v-model:open="historyOpen" />
 
