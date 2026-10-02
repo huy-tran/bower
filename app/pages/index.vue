@@ -7,8 +7,8 @@ const { project, projects, selected, selectedIndex, mainTab, mode, playing, time
 const music = useMusic()
 const narration = useNarration()
 const toast = useToast()
-// package.json's version; "dev" marks a `nuxt dev` server rather than a build.
-const appVersion = `v${useRuntimeConfig().public.version}${import.meta.dev ? ' · dev' : ''}`
+// The About window (from the Bower menu on the logo).
+const aboutOpen = ref(false)
 
 const presenting = ref(false)
 const settingsOpen = ref(false)
@@ -243,7 +243,7 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => [[
   { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
   { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
 ], [
-  { label: `Bower ${appVersion}`, icon: 'i-lucide-bird', disabled: true }
+  { label: 'About Bower', icon: 'i-heroicons-information-circle', onSelect: () => (aboutOpen.value = true) }
 ]])
 
 const projectMenu = computed<DropdownMenuItem[][]>(() => {
@@ -315,10 +315,7 @@ async function copyPath() {
         <UDropdownMenu :items="bowerMenu" :content="{ align: 'start' }">
           <button type="button" class="-my-1 flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary" aria-label="Bower menu">
             <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
-            <div class="flex flex-col gap-0.5">
-              <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
-              <span class="text-[11px] leading-none text-muted tabular-nums">{{ appVersion }}</span>
-            </div>
+            <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
           </button>
         </UDropdownMenu>
         <ProjectPicker @new="openNew" />
@@ -456,6 +453,7 @@ async function copyPath() {
     <TrashModal v-model:open="trashOpen" />
     <ProjectSettingsModal v-if="project" v-model:open="settingsOpen" v-model:tab="settingsTab" />
     <BowerSettingsModal />
+    <AboutModal v-model:open="aboutOpen" />
     <StoryboardModal v-if="project" v-model:open="storyOpen" />
     <HistoryModal v-if="project" v-model:open="historyOpen" />
 
