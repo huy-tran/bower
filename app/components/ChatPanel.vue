@@ -225,6 +225,13 @@ async function remove() {
   } catch (e) { fail(e, 'Could not delete scene') }
 }
 
+async function copyScenePath() {
+  const path = selected.value?.path
+  if (!path) return
+  await navigator.clipboard.writeText(path)
+  toast.add({ title: 'Scene file path copied', description: path, color: 'neutral' })
+}
+
 function openExternal() {
   window.open(frameUrl(pid.value, selected.value!), '_blank')
 }
@@ -320,6 +327,7 @@ function timeAgo(iso: string) {
           </UDropdownMenu>
         </UFieldGroup>
         <UTooltip text="Open scene in a new tab"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-arrow-top-right-on-square" aria-label="Open scene in a new tab" @click="openExternal" /></UTooltip>
+        <UTooltip text="Copy the scene file's path (to open it in your own editor)"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-clipboard-document" aria-label="Copy scene file path" @click="copyScenePath" /></UTooltip>
         <UTooltip text="Duplicate scene"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-document-duplicate" aria-label="Duplicate scene" @click="duplicate" /></UTooltip>
         <UTooltip text="Save as a template to reuse in other projects"><UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-bookmark" aria-label="Save as template" :disabled="busy" @click="openSaveTemplate" /></UTooltip>
         <UTooltip text="Delete scene"><UButton size="sm" color="error" variant="ghost" icon="i-heroicons-trash" aria-label="Delete scene" :disabled="project.scenes.length <= 1 || busy" @click="confirmDelete = true" /></UTooltip>

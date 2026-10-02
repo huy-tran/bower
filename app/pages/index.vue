@@ -64,7 +64,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onDrop)
 })
 
-const mainTabs = [{ label: 'Scenes', value: 'scenes' }, { label: 'Render', value: 'render' }]
 const modeTabs = [{ label: 'This scene', value: 'scene' }, { label: 'Whole video', value: 'video' }]
 const modeModel = computed({ get: () => mode.value, set: v => ed.setMode(v as PlayMode) })
 const rateItems = [{ label: '0.25×', value: 0.25 }, { label: '0.5×', value: 0.5 }, { label: '1×', value: 1 }]
@@ -268,6 +267,9 @@ const projectMenu = computed<DropdownMenuItem[][]>(() => {
   if (!p) return []
   const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
   return [[
+    // The stage format, for reference; "New version for social" below makes another one.
+    { label: `${formatLabel.value} · ${p.width}×${p.height} · ${p.fps} fps`, type: 'label' }
+  ], [
     { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', onSelect: () => openSettings() },
     { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', onSelect: () => (storyOpen.value = true) },
     { label: 'History…', icon: 'i-heroicons-clock', onSelect: () => (historyOpen.value = true) }
@@ -283,7 +285,8 @@ const projectMenu = computed<DropdownMenuItem[][]>(() => {
   ], [
     { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', onSelect: () => { window.location.href = `/api/projects/${p.id}/export` } },
     { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', onSelect: () => { window.location.href = `/api/projects/${p.id}/player?download=1` } },
-    { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', onSelect: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } }
+    { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', onSelect: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } },
+    { label: 'Copy project folder path', icon: 'i-heroicons-clipboard-document', onSelect: copyProjectPath }
   ], [
     { label: 'Open another project…', icon: 'i-heroicons-arrows-right-left', onSelect: () => (allProjectsOpen.value = true) },
     { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', onSelect: () => (deleteOpen.value = true) }
@@ -306,11 +309,11 @@ async function importProject(e: Event) {
   }
 }
 
-async function copyPath() {
-  const path = selected.value?.path
+async function copyProjectPath() {
+  const path = project.value?.path
   if (!path) return
   await navigator.clipboard.writeText(path)
-  toast.add({ title: 'Path copied', description: path, color: 'neutral' })
+  toast.add({ title: 'Project folder path copied', description: path, color: 'neutral' })
 }
 </script>
 
@@ -337,19 +340,21 @@ async function copyPath() {
             <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
           </button>
         </UDropdownMenu>
-        <UDropdownMenu v-if="project" :items="projectMenu" :content="{ align: 'start' }" :ui="{ content: 'min-w-60' }">
-          <UButton color="neutral" variant="outline" class="max-w-80 justify-start" trailing-icon="i-heroicons-chevron-down" :ui="{ trailingIcon: 'ml-1' }" aria-label="Project menu">
-            <span class="flex min-w-0 items-center gap-1 truncate">
-              <template v-for="c in projectCrumbs" :key="c"><span class="text-muted">{{ c }}</span><span class="text-dimmed">/</span></template>
-              <span class="truncate text-highlighted">{{ project.name }}</span>
-            </span>
-          </UButton>
-        </UDropdownMenu>
+        <!-- The project name takes the free width; when space runs out the folder path shortens before the name. -->
+        <div v-if="project" class="flex min-w-0 shrink">
+          <UDropdownMenu :items="projectMenu" :content="{ align: 'start' }" :ui="{ content: 'min-w-64' }">
+            <UButton color="neutral" variant="outline" class="min-w-0 max-w-full justify-start" trailing-icon="i-heroicons-chevron-down" :ui="{ trailingIcon: 'ml-1 shrink-0' }" aria-label="Project menu" :title="[...projectCrumbs, project.name].join(' / ')">
+              <span class="flex min-w-0 items-center gap-1">
+                <span v-if="projectCrumbs.length" class="min-w-0 shrink truncate text-muted">{{ projectCrumbs.join(' / ') }}</span>
+                <span v-if="projectCrumbs.length" class="shrink-0 text-dimmed">/</span>
+                <span class="min-w-0 truncate text-highlighted [flex-shrink:0.15]">{{ project.name }}</span>
+              </span>
+            </UButton>
+          </UDropdownMenu>
+        </div>
         <UButton v-else color="neutral" variant="outline" icon="i-heroicons-squares-2x2" label="Choose a project" @click="allProjectsOpen = true" />
         <ProjectPicker v-model:open="allProjectsOpen" @new="openNew" />
-        <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />
         <input ref="importInput" type="file" accept=".zip,application/zip" class="hidden" @change="importProject">
-        <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />
         <div class="ml-auto flex items-center gap-2">
           <DesktopUpdate />
           <template v-if="story.state.building && story.state.waiting">
@@ -383,7 +388,8 @@ async function copyPath() {
           <UTooltip text="This project: name, art direction, brand kit, app, code, narrator and captions">
             <UButton color="neutral" variant="outline" icon="i-heroicons-cog-6-tooth" label="Settings" :disabled="!project" @click="openSettings()" />
           </UTooltip>
-          <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document" label="Copy path" :disabled="!selected" @click="copyPath" />
+          <UButton v-if="mainTab === 'scenes'" color="neutral" variant="outline" icon="i-heroicons-film" label="Render" :disabled="!project" @click="mainTab = 'render'" />
+          <UButton v-else color="neutral" variant="outline" icon="i-heroicons-arrow-left" label="Back to scenes" @click="mainTab = 'scenes'" />
           <UColorModeButton />
           <UButton icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
         </div>
