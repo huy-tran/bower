@@ -11,8 +11,34 @@ const tabs = [
   { label: 'Claude Code', value: 'claude', icon: 'i-heroicons-sparkles', description: 'Bower builds scenes with Claude Code on this computer.' },
   { label: 'New projects', value: 'defaults', icon: 'i-heroicons-document-plus', description: 'What new projects start with, and the model chats use unless one is picked. Existing projects keep their own settings.' },
   { label: 'Apps', value: 'apps', icon: 'i-heroicons-window', description: 'The products your videos are about. Each is set up once (address, notes, code, sign-in) and shared by every project that picks it.' },
-  { label: 'Appearance', value: 'appearance', icon: 'i-heroicons-swatch', description: 'How Bower looks on this computer. Your videos are not affected.' }
+  { label: 'Appearance', value: 'appearance', icon: 'i-heroicons-swatch', description: 'How Bower looks on this computer. Your videos are not affected.' },
+  { label: 'Shortcuts', value: 'keys', icon: 'i-heroicons-command-line', description: 'Change the keys for playback. They work the same in the browser and the desktop app, whenever you are not typing.' }
 ]
+
+// Changing a shortcut: click Change, press the new keys (Escape cancels). Keys already used elsewhere are refused.
+const hotkeys = useHotkeys()
+const ACTIONS = Object.keys(HOTKEY_LABELS) as HotkeyAction[]
+const capturing = ref<HotkeyAction | null>(null)
+const keyError = ref('')
+function onCaptureKey(e: KeyboardEvent) {
+  if (!capturing.value) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.key === 'Escape') { capturing.value = null; keyError.value = ''; return }
+  const combo = comboOf(e)
+  if (!combo) return
+  const used = hotkeys.clash(capturing.value, combo)
+  if (used) { keyError.value = `${kbdsOf(combo).join(' + ')} already does "${used}". Try another key.`; return }
+  const action = capturing.value
+  capturing.value = null
+  keyError.value = ''
+  hotkeys.set(action, combo)
+}
+watch(capturing, (c) => {
+  if (c) window.addEventListener('keydown', onCaptureKey, true)
+  else window.removeEventListener('keydown', onCaptureKey, true)
+})
+watch(open, (o) => { if (!o) capturing.value = null })
 const colorMode = useColorMode()
 const themeItems = [
   { label: 'Light', value: 'light' },
@@ -128,6 +154,31 @@ async function addApp() {
           </div>
 
           <ClaudeCodeSetup v-if="tab === 'claude'" />
+
+          <div v-else-if="tab === 'keys'" class="space-y-5">
+            <div class="divide-y divide-default rounded-lg ring-1 ring-default">
+              <div v-for="a in ACTIONS" :key="a" class="flex items-center gap-3 px-4 py-3">
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-medium text-highlighted">{{ HOTKEY_LABELS[a].label }}</p>
+                  <p class="text-xs text-muted">{{ HOTKEY_LABELS[a].description }}</p>
+                </div>
+                <span v-if="capturing === a" class="animate-pulse text-sm text-primary">Press the new keys…</span>
+                <span v-else class="flex gap-1"><UKbd v-for="k in kbdsOf(hotkeys.keys[a])" :key="k" :value="k" /></span>
+                <UButton size="xs" color="neutral" variant="outline" :label="capturing === a ? 'Cancel' : 'Change'" @click="capturing = capturing === a ? null : a" />
+                <UButton size="xs" color="neutral" variant="ghost" label="Reset" :disabled="hotkeys.keys[a] === HOTKEY_DEFAULTS[a]" @click="hotkeys.set(a, null)" />
+              </div>
+            </div>
+            <p v-if="keyError" class="text-sm text-error">{{ keyError }}</p>
+            <div>
+              <h3 class="mb-2 text-sm font-semibold text-highlighted">Other shortcuts</h3>
+              <div class="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                <div v-for="f in FIXED_HOTKEYS" :key="f.combo" class="flex items-center justify-between gap-3">
+                  <span class="text-muted">{{ f.label }}</span>
+                  <span class="flex gap-1"><UKbd v-for="k in kbdsOf(f.combo)" :key="k" :value="k" size="sm" /></span>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div v-else-if="tab === 'appearance'" class="space-y-5">
             <UFormField label="Theme">

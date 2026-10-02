@@ -109,6 +109,14 @@ function onScrub(activeNow: boolean) {
 }
 
 // Leave keys to whatever has focus: text fields, and Nuxt UI tabs, menus and dialogs have their own arrow-key navigation.
+const hotkeys = useHotkeys()
+// The start of what plays: the loop when there is one, else the scene (This scene) or the video (Whole video).
+function playFromStart() {
+  ed.pause()
+  ed.seek(loop.value?.from ?? 0)
+  ed.play()
+}
+
 function focusOwnsKey(e: KeyboardEvent) {
   const t = e.target as HTMLElement
   if (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName)) return true
@@ -119,11 +127,14 @@ function focusOwnsKey(e: KeyboardEvent) {
 
 function onKey(e: KeyboardEvent) {
   if (presenting.value || focusOwnsKey(e) || mainTab.value !== 'scenes' || !project.value) return
+  // The shortcuts people can change (Bower settings, Keyboard shortcuts); they may use Ctrl, Alt or Shift.
+  if (hotkeys.is(e, 'playPause')) { e.preventDefault(); ed.toggle(); return }
+  if (hotkeys.is(e, 'toggleScope')) { e.preventDefault(); ed.setMode(mode.value === 'scene' ? 'video' : 'scene'); return }
+  if (hotkeys.is(e, 'playFromStart')) { e.preventDefault(); playFromStart(); return }
   if (e.ctrlKey || e.metaKey || e.altKey) return
   const frame = 1000 / (project.value.fps || 30)
   const k = e.key.toLowerCase()
-  if (e.key === ' ') { e.preventDefault(); ed.toggle() }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); ed.pause(); ed.seek(time.value + (e.shiftKey ? 1000 : frame)) }
+  if (e.key === 'ArrowRight') { e.preventDefault(); ed.pause(); ed.seek(time.value + (e.shiftKey ? 1000 : frame)) }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); ed.pause(); ed.seek(time.value - (e.shiftKey ? 1000 : frame)) }
   else if (e.key === 'Home') { e.preventDefault(); ed.seek(loop.value?.from ?? 0) }
   else if (k === 'i') ed.setLoop(time.value, loop.value?.to ?? timelineDuration.value)
@@ -308,7 +319,9 @@ const paletteGroups = computed(() => {
       mainTab.value === 'scenes'
         ? { id: 'render', label: 'Render the video', icon: 'i-heroicons-film', keywords: 'export mp4 gif', run: () => { mainTab.value = 'render' } }
         : { id: 'scenes', label: 'Back to scenes', icon: 'i-heroicons-arrow-left', run: () => { mainTab.value = 'scenes' } },
-      { id: 'play', label: playing.value ? 'Pause' : 'Play', icon: playing.value ? 'i-heroicons-pause' : 'i-heroicons-play', kbds: ['space'], run: () => ed.toggle() },
+      { id: 'play', label: playing.value ? 'Pause' : 'Play', icon: playing.value ? 'i-heroicons-pause' : 'i-heroicons-play', kbds: kbdsOf(hotkeys.keys.playPause), run: () => ed.toggle() },
+      { id: 'play-start', label: 'Play from the start', icon: 'i-heroicons-backward', kbds: kbdsOf(hotkeys.keys.playFromStart), run: playFromStart },
+      { id: 'scope', label: mode.value === 'scene' ? 'Switch to Whole video' : 'Switch to This scene', icon: 'i-heroicons-arrows-right-left', kbds: kbdsOf(hotkeys.keys.toggleScope), keywords: 'scene video mode', run: () => ed.setMode(mode.value === 'scene' ? 'video' : 'scene') },
       { id: 'present', label: 'Present full screen', icon: 'i-heroicons-arrows-pointing-out', run: () => { presenting.value = true } },
       { id: 'storyboard', label: 'Storyboard', icon: 'i-heroicons-clipboard-document-list', keywords: 'plan brief', run: () => { storyOpen.value = true } },
       { id: 'history', label: 'History', icon: 'i-heroicons-clock', keywords: 'undo versions', run: () => { historyOpen.value = true } },
@@ -349,6 +362,7 @@ const paletteGroups = computed(() => {
       { id: 'bs-claude', label: 'Bower settings: Claude Code', icon: 'i-heroicons-sparkles', run: () => bower.show('claude') },
       { id: 'bs-defaults', label: 'Bower settings: New projects', icon: 'i-heroicons-document-plus', run: () => bower.show('defaults') },
       { id: 'bs-apps', label: 'Apps', icon: 'i-heroicons-window', run: () => bower.show('apps') },
+      { id: 'bs-keys', label: 'Keyboard shortcuts', icon: 'i-heroicons-command-line', keywords: 'hotkeys keys', run: () => bower.show('keys') },
       ...THEMES.map(t => ({ id: `theme-${t.value}`, label: `Theme: ${t.label}`, icon: t.icon, keywords: 'dark light appearance', run: () => { colorMode.preference = t.value } })),
       { id: 'trash', label: 'Trash', icon: 'i-heroicons-archive-box', run: () => { trashOpen.value = true } },
       { id: 'about', label: 'About Bower', icon: 'i-heroicons-information-circle', keywords: 'version', run: () => { aboutOpen.value = true } }

@@ -10,6 +10,8 @@ the app, come from its section here: add a `## x.y.z` section before tagging `vx
   settings tab, or switch the theme.
 - **What's new.** The update dialog lists what changed in the new version, and About shows the notes for the version
   you have.
+- **Playback shortcuts you can change**, in Bower settings, Shortcuts: Play / Pause (Space), switch between This scene
+  and Whole video (V), and Play from the start (Shift+Space). The settings also list every other shortcut.
 
 ### Improved
 - The desktop app has no menu bar or Windows title bar any more: Bower's own top strip takes their place, with the

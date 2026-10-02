@@ -8,7 +8,13 @@ export const SETTINGS_FILE = resolve(STORAGE, '..', 'settings.json')
 
 export type AppModeSetting = 'shots' | 'rebuild' | 'auto'
 export interface NewProjectDefaults { width: number, height: number, fps: number, visualChecks: boolean, appMode: AppModeSetting, voice: string }
-export interface BowerSettings { claudePath?: string, model?: string, defaults: NewProjectDefaults }
+// Keyboard shortcuts people can change (app/composables/useHotkeys.ts). Written like "shift+space" or "v".
+export type HotkeyAction = 'playPause' | 'toggleScope' | 'playFromStart'
+export type Hotkeys = Record<HotkeyAction, string>
+export const HOTKEYS: Hotkeys = { playPause: 'space', toggleScope: 'v', playFromStart: 'shift+space' }
+const COMBO = /^(ctrl\+)?(alt\+)?(shift\+)?(meta\+)?([a-z0-9]|space|enter|tab|backspace|delete|insert|home|end|pageup|pagedown|arrow(up|down|left|right)|f([1-9]|1[0-2])|[,./;'[\]\\`=-])$/
+
+export interface BowerSettings { claudePath?: string, model?: string, defaults: NewProjectDefaults, hotkeys: Hotkeys }
 
 export const DEFAULTS: NewProjectDefaults = { width: 1920, height: 1080, fps: 30, visualChecks: true, appMode: 'shots', voice: 'af_heart' }
 const MODELS = ['opus', 'sonnet', 'haiku']
@@ -21,11 +27,11 @@ async function readRaw(): Promise<Record<string, any>> {
 
 export async function readSettings(): Promise<BowerSettings> {
   const raw = await readRaw()
-  return { ...raw, defaults: { ...DEFAULTS, ...raw.defaults } }
+  return { ...raw, defaults: { ...DEFAULTS, ...raw.defaults }, hotkeys: { ...HOTKEYS, ...raw.hotkeys } }
 }
 
 // Validates each key; unknown keys and bad values are dropped. An empty string or null removes a setting.
-export async function patchSettings(patch: Partial<{ claudePath: string | null, model: string | null, defaults: Partial<NewProjectDefaults> }>) {
+export async function patchSettings(patch: Partial<{ claudePath: string | null, model: string | null, defaults: Partial<NewProjectDefaults>, hotkeys: Partial<Record<HotkeyAction, string | null>> }>) {
   const next = await readRaw()
   if (patch.claudePath !== undefined) next.claudePath = patch.claudePath || undefined
   if (patch.model !== undefined) next.model = patch.model && MODELS.includes(patch.model) ? patch.model : undefined
@@ -38,6 +44,20 @@ export async function patchSettings(patch: Partial<{ claudePath: string | null, 
     if (p.appMode && ['shots', 'rebuild', 'auto'].includes(p.appMode)) d.appMode = p.appMode
     if (p.voice && VOICES.includes(p.voice)) d.voice = p.voice
     next.defaults = d
+  }
+  if (patch.hotkeys) {
+    // null puts an action back on its default. Two actions can never share keys.
+    const h: Hotkeys = { ...HOTKEYS, ...next.hotkeys }
+    for (const [action, combo] of Object.entries(patch.hotkeys) as [HotkeyAction, string | null][]) {
+      if (!(action in HOTKEYS)) continue
+      const value = combo === null ? HOTKEYS[action] : String(combo).toLowerCase().trim()
+      if (!COMBO.test(value)) throw createError({ statusCode: 422, message: `"${combo}" is not a key Bower can use` })
+      h[action] = value
+    }
+    const used = Object.values(h)
+    if (new Set(used).size !== used.length) throw createError({ statusCode: 422, message: 'Two shortcuts cannot use the same keys' })
+    next.hotkeys = Object.fromEntries(Object.entries(h).filter(([a, v]) => v !== HOTKEYS[a as HotkeyAction]))
+    if (!Object.keys(next.hotkeys).length) next.hotkeys = undefined
   }
   for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k]
   await fs.mkdir(dirname(SETTINGS_FILE), { recursive: true })
