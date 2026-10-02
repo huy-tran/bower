@@ -136,6 +136,13 @@ function useInChat(s: { path: string, url: string, name: string }) {
 
 // Linked repositories. Labels and notes autosave; adding one is explicit because the server validates the path.
 const newRepo = reactive({ label: '', path: '', notes: '' })
+// The link form stays tucked behind "Add repository" once a repo is linked; with none it is the whole tab.
+const linkFormOpen = ref(false)
+const showLinkForm = computed(() => !draft.repos.length || linkFormOpen.value)
+function cancelLink() {
+  Object.assign(newRepo, { label: '', path: '', notes: '' })
+  linkFormOpen.value = false
+}
 const saveRepos = () => save({ codebases: draft.repos }, 600)
 async function addRepo() {
   const path = newRepo.path.trim()
@@ -145,6 +152,7 @@ async function addRepo() {
     const view = await $fetch<any>(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { codebases: [...draft.repos, { label: newRepo.label.trim(), path, notes }] } })
     setProject(view)
     Object.assign(newRepo, { label: '', path: '', notes: '' })
+    linkFormOpen.value = false
     // No note written by hand: let Claude read the repo and write one.
     const added = view.codebases.find((c: any) => c.path.toLowerCase() === path.toLowerCase() || c.path.toLowerCase().endsWith(path.replace(/[\\/]+$/, '').toLowerCase()))
     if (added && !notes.trim()) {
@@ -308,7 +316,8 @@ function download(format: 'srt' | 'vtt') {
               <UTextarea v-model="draft.repos[i]!.notes" :rows="3" autoresize class="w-full" :placeholder="scans[r.path] ? 'Claude is writing this…' : 'Where to look, e.g. Laravel API: routes in routes/api.php, models in app/Models, resources in app/Http/Resources. Or click Scan with Claude.'" @update:model-value="saveRepos" />
             </UCard>
 
-            <UCard :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
+            <UButton v-if="!showLinkForm" color="neutral" variant="outline" icon="i-heroicons-plus" label="Add repository" @click="linkFormOpen = true" />
+            <UCard v-else :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
               <h3 class="font-semibold text-highlighted">{{ draft.repos.length ? 'Link another repository' : 'Link a repository' }}</h3>
               <div class="grid grid-cols-[10rem_1fr] gap-2">
                 <UFormField label="Label" size="sm">
@@ -326,8 +335,8 @@ function download(format: 'srt' | 'vtt') {
               <UFormField label="Where to look" size="sm" hint="Optional" help="Leave it empty and Claude reads the repo and writes this note itself after linking.">
                 <UTextarea v-model="newRepo.notes" :rows="3" autoresize class="w-full" placeholder="e.g. Vue 3 app. Screens in src/pages, components in src/components, design tokens in tailwind.config.js and src/assets/css/app.css." />
               </UFormField>
-              <div class="flex items-center justify-between gap-3">
-                <p class="text-xs text-muted">Paths are per machine: teammates who import this project link their own.</p>
+              <div class="flex items-center justify-end gap-2">
+                <UButton v-if="draft.repos.length" color="neutral" variant="ghost" label="Cancel" @click="cancelLink" />
                 <UButton icon="i-heroicons-link" label="Link" :disabled="!newRepo.path.trim()" @click="addRepo" />
               </div>
             </UCard>
