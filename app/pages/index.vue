@@ -388,10 +388,19 @@ async function copyProjectPath() {
           </UFieldGroup>
           <NarrationStatus />
           <UTooltip v-if="setup.blocked.value" text="Claude cannot build scenes until Claude Code is installed and signed in">
-            <UButton color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" label="Set up Claude Code" @click="bower.show('claude')" />
+            <UButton color="error" variant="soft" icon="i-heroicons-exclamation-triangle" label="Set up Claude Code" @click="bower.show('claude')" />
           </UTooltip>
-          <UTooltip v-else-if="project && setup.done.value < setup.total.value" text="Finish setting up this project so videos look like your real product">
-            <UButton color="neutral" variant="outline" icon="i-heroicons-rocket-launch" :ui="{ leadingIcon: 'text-primary' }" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
+          <!-- Setup progress: red when a working step broke, amber when barely started, blue when nearly there. -->
+          <UTooltip v-else-if="project && setup.status.value" :text="setup.status.value.tip" :ui="{ content: 'max-w-80 h-auto py-1.5 whitespace-normal' }">
+            <UButton :color="setup.status.value.color" variant="soft" :label="setup.status.value.label" @click="openSettings(setup.problems.value.length ? 'app' : 'general')">
+              <template #leading>
+                <UIcon v-if="setup.problems.value.length" name="i-heroicons-exclamation-triangle" class="size-5" />
+                <svg v-else class="size-5 -rotate-90" viewBox="0 0 20 20" aria-hidden="true">
+                  <circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="2.5" />
+                  <circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" :stroke-dasharray="`${setup.ratio.value * 47.12} 47.12`" />
+                </svg>
+              </template>
+            </UButton>
           </UTooltip>
           <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
             <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />

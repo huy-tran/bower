@@ -52,8 +52,34 @@ export function useSetup() {
   // Claude Code missing or signed out blocks everything, so the chip turns to a warning.
   const blocked = computed(() => !!health.value && !(health.value.installed && health.value.loggedIn))
 
+  // Steps that were set up and have since broken: the app stopped answering, or Bower was signed out (without
+  // a saved login to sign back in). These fail screenshots and recordings, so they outrank plain progress.
+  const problems = computed(() => {
+    const s = sessionFor.value === project.value?.id ? session.value : null
+    if (!project.value?.app || !s) return [] as string[]
+    const out: string[] = []
+    if (s.reachable === false) out.push('App not responding')
+    else if (s.signedIn === false && !s.saved) out.push('Signed out of app')
+    return out
+  })
+
+  // The chip's state: something broke (red), just started (amber), most of the way (blue), or all done (hidden).
+  const status = computed(() => {
+    const ratio = total.value ? done.value / total.value : 1
+    if (problems.value.length) {
+      return { color: 'error' as const, label: problems.value[0]!, tip: `${problems.value[0]}: screenshots, recordings and live UI of the app will fail until this is fixed.` }
+    }
+    if (ratio >= 1) return null
+    const left = total.value - done.value
+    const tip = `${left} step${left === 1 ? '' : 's'} left. ${items.value.filter(i => !i.done).map(i => i.label).join(', ')}: these make the video look like your real product.`
+    return ratio < 0.5
+      ? { color: 'warning' as const, label: `Setup ${done.value}/${total.value}`, tip }
+      : { color: 'info' as const, label: `Setup ${done.value}/${total.value}`, tip }
+  })
+  const ratio = computed(() => total.value ? done.value / total.value : 1)
+
   return {
-    items, done, total, blocked, health: readonly(health), checkingClaude: readonly(checkingClaude),
+    items, done, total, ratio, blocked, problems, status, health: readonly(health), checkingClaude: readonly(checkingClaude),
     checkClaude, loadSession, setSession: (pid: string, s: SetupSession | null) => { sessionFor.value = pid; session.value = s }
   }
 }
