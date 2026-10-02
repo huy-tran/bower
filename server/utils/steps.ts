@@ -245,6 +245,8 @@ export interface RunHooks {
   // Called for a `shot` step; the runner itself never writes files.
   shot: (name: string, full: boolean, index: number) => Promise<void>
   resolve: (target: string) => string
+  // Called after a `goto` step loads, to catch a session that ran out (see session.ts).
+  navigated?: (url: string) => Promise<void>
 }
 
 // Executes the steps on the page. Throws StepError with the failing step's number and the reason.
@@ -310,13 +312,16 @@ export async function runSteps(page: Page, steps: Step[], hooks: RunHooks) {
         }
         await new Promise(r => setTimeout(r, 250))
       } else if ('goto' in s) {
-        await page.goto(hooks.resolve(s.goto), { waitUntil: 'networkidle2', timeout: 60_000 })
+        const url = hooks.resolve(s.goto)
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 })
+        await hooks.navigated?.(url)
         await settle(page, 600)
       } else if ('shot' in s) {
         await hooks.shot(s.shot, !!s.full, i)
       }
     } catch (e: any) {
-      if (e instanceof StepError) throw e
+      // A step error, or an HTTP error from a hook (signed out of the app), passes through as it is.
+      if (e instanceof StepError || e?.statusCode) throw e
       throw new StepError(i, s, String(e?.message || e).replace(/^Error:\s*/, ''))
     }
   }

@@ -16,8 +16,9 @@ function run(args: string[]) {
 }
 
 // Tells a new teammate up front if Claude Code is missing or signed out.
-export default defineEventHandler(async () => {
-  if (cached && Date.now() - cached.at < 60_000) return cached.value
+export default defineEventHandler(async (event) => {
+  // ?fresh=1 skips the cache, for the setup checklist's "Check again" after installing or signing in.
+  if (cached && !getQuery(event).fresh && Date.now() - cached.at < 60_000) return cached.value
   const version = await run(['--version'])
   const value: Health = { claude: { installed: version.ok && !!version.out.trim(), loggedIn: false } }
   if (value.claude.installed) {

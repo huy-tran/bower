@@ -128,6 +128,8 @@ function appSection(p: Project) {
     '- Read the PNG to see it. Use it two ways: as a reference to rebuild the screen in HTML/SVG, or shown directly in a scene',
     `  with \`<img src="/api/projects/${p.id}/files/assets/shots/<name>.png">\` inside a device frame, cropped or zoomed with transforms.`,
     '- Take only the screenshots the request needs. Do not screenshot the editor itself.',
+    '- If a capture says Bower is signed out of the app, stop capturing and tell the user in one sentence to sign in again in',
+    '  Settings, App. Do not try to sign in yourself, and do not use a screenshot of the sign-in page in place of the real screen.',
     '',
     '### Real screenshots or rebuilt screens',
     '',

@@ -93,8 +93,125 @@ async function loadShots() {
   if (!project.value) return
   shots.value = await $fetch(`/api/projects/${project.value.id}/app/shots`).catch(() => [])
   loginOpen.value = (await $fetch<{ open: boolean }>(`/api/projects/${project.value.id}/app/login`).catch(() => ({ open: false }))).open
+  await loadSession()
 }
-watch([tab, open], ([t, o]) => { if (o && (t === 'app' || t === 'shots')) loadShots() }, { immediate: true })
+
+// Sign-in status, the connection test and the optional saved login (see server/utils/session.ts).
+interface SessionInfo { signedIn?: boolean, checkedAt?: string, reachable?: boolean, error?: string, home?: string, saved: { user: string } | null, savedSupported: boolean, open: 'login' | 'record' | null }
+const session = ref<SessionInfo | null>(null)
+const checking = ref(false)
+const lastCheck = ref<{ reachable: boolean, signedIn: boolean | null, autoSignedIn?: boolean, error?: string, title?: string, loginOpen?: boolean } | null>(null)
+async function loadSession() {
+  if (!project.value?.app) { session.value = null; return }
+  session.value = await $fetch<SessionInfo>(`/api/projects/${project.value.id}/app/session`).catch(() => null)
+}
+async function testConnection() {
+  checking.value = true
+  try {
+    lastCheck.value = await $fetch(`/api/projects/${project.value!.id}/app/check`, { method: 'POST' })
+    await loadSession()
+  } catch (err: any) {
+    lastCheck.value = { reachable: false, signedIn: null, error: err?.data?.message || err?.message }
+  } finally {
+    checking.value = false
+  }
+}
+const ago = (iso?: string) => {
+  if (!iso) return ''
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`
+}
+const signInStatus = computed(() => {
+  const s = session.value
+  if (!s) return null
+  if (s.signedIn === true) return { color: 'success' as const, icon: 'i-heroicons-check-circle', text: `Signed in${s.checkedAt ? `, checked ${ago(s.checkedAt)}` : ''}` }
+  if (s.signedIn === false) return { color: 'warning' as const, icon: 'i-heroicons-exclamation-triangle', text: `Signed out${s.checkedAt ? ` (found ${ago(s.checkedAt)})` : ''}. ${s.saved ? 'Bower will sign in with the saved login.' : 'Sign in again, or save a login below.'}` }
+  return { color: 'neutral' as const, icon: 'i-heroicons-question-mark-circle', text: 'Not checked yet' }
+})
+const credentials = reactive({ user: '', password: '', busy: false })
+async function saveCredentials() {
+  credentials.busy = true
+  try {
+    await $fetch(`/api/projects/${project.value!.id}/app/credentials`, { method: 'PUT', body: { user: credentials.user, password: credentials.password } })
+    credentials.password = ''
+    await loadSession()
+    toast.add({ title: 'Login saved', description: 'Bower signs in with it whenever the session runs out.', color: 'success' })
+  } catch (err: any) {
+    toast.add({ title: 'Could not save the login', description: err?.data?.message || err?.message, color: 'error' })
+  } finally {
+    credentials.busy = false
+  }
+}
+async function removeCredentials() {
+  await $fetch(`/api/projects/${project.value!.id}/app/credentials`, { method: 'DELETE' })
+  await loadSession()
+}
+
+// "Getting around" notes written by Claude from a walk through the app's menus.
+const notesJob = ref<{ status: string, activity: string[], error?: string } | null>(null)
+async function writeNotes() {
+  const pid = project.value!.id
+  try {
+    notesJob.value = await $fetch(`/api/projects/${pid}/app/notes`, { method: 'POST' })
+    while (notesJob.value?.status === 'running') {
+      await new Promise(r => setTimeout(r, 2000))
+      notesJob.value = await $fetch(`/api/projects/${pid}/app/notes`)
+    }
+    if (notesJob.value?.status === 'error') throw new Error(notesJob.value.error)
+    const view = await $fetch<any>(`/api/projects/${pid}`)
+    setProject(view)
+    draft.app.notes = view.app?.notes ?? draft.app.notes
+    toast.add({ title: 'Notes written', description: 'Claude mapped the app from its menus. Edit them freely.', color: 'success' })
+  } catch (err: any) {
+    toast.add({ title: 'Could not write the notes', description: err?.data?.message || err?.message, color: 'error', duration: 10000 })
+  } finally {
+    notesJob.value = null
+  }
+}
+
+// Record steps: the user clicks through the app in a visible window and Bower writes the steps.
+const recording = ref<{ open: boolean, steps: any[], start: string, skippedPassword: boolean } | null>(null)
+async function startRecording() {
+  const pid = project.value!.id
+  try {
+    recording.value = await $fetch(`/api/projects/${pid}/app/record`, { method: 'POST', body: { target: capture.target } })
+    loginOpen.value = true
+    while (recording.value?.open) {
+      await new Promise(r => setTimeout(r, 1000))
+      recording.value = await $fetch(`/api/projects/${pid}/app/record`)
+    }
+    loginOpen.value = false
+    const r = recording.value
+    if (r?.steps.length) {
+      try { capture.target = new URL(r.start).pathname + new URL(r.start).search } catch {}
+      capture.steps = `[\n${r.steps.map(s => JSON.stringify(s)).join(',\n')}\n]`
+      toast.add({ title: `Recorded ${r.steps.length} step${r.steps.length === 1 ? '' : 's'}`, description: `${r.skippedPassword ? 'Passwords were left out. ' : ''}Check them below, then Capture.`, color: 'success' })
+    }
+  } catch (err: any) {
+    toast.add({ title: 'Could not record', description: err?.data?.message || err?.message, color: 'error' })
+  } finally {
+    recording.value = null
+  }
+}
+async function finishRecording() {
+  await $fetch(`/api/projects/${project.value!.id}/app/record`, { method: 'DELETE' }).catch(() => {})
+}
+// The steps in words, so nobody has to read JSON.
+const stepsPreview = computed(() => {
+  const raw = capture.steps.trim()
+  if (!raw) return null
+  try {
+    const list = JSON.parse(raw)
+    if (!Array.isArray(list)) return { error: 'Steps must be a list, starting with [' }
+    const say = (s: any) => s.click ? `Click "${s.click}"` : s.hover ? `Hover over "${s.hover}"` : s.type !== undefined ? `Type "${s.type}" in "${s.in}"` : s.select ? `Choose "${s.select}" in "${s.in}"` : s.press ? `Press ${s.press}` : s.wait !== undefined ? (typeof s.wait === 'number' ? `Wait ${s.wait} ms` : `Wait for "${s.wait}"${s.gone ? ' to go away' : ''}`) : s.scroll !== undefined ? `Scroll ${typeof s.scroll === 'number' ? `${s.scroll}px` : `to "${s.scroll}"`}` : s.goto ? `Go to ${s.goto}` : s.shot ? `Capture "${s.shot}"` : 'Unknown step'
+    return { items: list.map(say) }
+  } catch {
+    return { error: 'These steps are not valid JSON yet' }
+  }
+})
+// Declared after the state it loads: it runs straight away.
+watch([tab, open], ([t, o]) => { if (o && (t === 'app' || t === 'shots')) loadShots(); else if (o && t === 'general') loadSession() }, { immediate: true })
+watch(() => project.value?.id, () => { lastCheck.value = null })
 async function openLogin() {
   try {
     await $fetch(`/api/projects/${project.value!.id}/app/login`, { method: 'POST', body: { target: capture.target } })
@@ -102,7 +219,7 @@ async function openLogin() {
     toast.add({ title: 'Browser window opened', description: 'Sign in there, then close the window. The session is kept for screenshots.', color: 'info', duration: 8000 })
     const poll = setInterval(async () => {
       const r = await $fetch<{ open: boolean }>(`/api/projects/${project.value!.id}/app/login`).catch(() => ({ open: false }))
-      if (!r.open) { loginOpen.value = false; clearInterval(poll) }
+      if (!r.open) { loginOpen.value = false; clearInterval(poll); setTimeout(loadSession, 500) }
     }, 2000)
   } catch (err: any) {
     toast.add({ title: 'Could not open the browser', description: err?.data?.message || err?.message, color: 'error' })
@@ -268,6 +385,7 @@ function download(format: 'srt' | 'vtt') {
 
           <!-- General -->
           <div v-if="tab === 'general'" class="space-y-5">
+            <SetupChecklist :session="session" @go="t => (tab = t)" @test="() => { tab = 'app'; testConnection() }" />
             <UFormField label="Name">
               <UInput v-model="draft.name" class="w-full" @update:model-value="saveName" />
             </UFormField>
@@ -346,23 +464,54 @@ function download(format: 'srt' | 'vtt') {
           <!-- App -->
           <div v-else-if="tab === 'app'" class="space-y-5">
             <UFormField label="App address" hint="Base URL" help="Where the product runs for you, for example a local dev server or a staging site.">
-              <UInput v-model="draft.app.url" placeholder="e.g. http://localhost:8000 or https://staging.acme.com" class="w-full font-mono text-sm" @update:model-value="saveApp" />
+              <div class="flex gap-2">
+                <UInput v-model="draft.app.url" placeholder="e.g. http://localhost:8000 or https://staging.acme.com" class="flex-1 font-mono text-sm" @update:model-value="saveApp" />
+                <UButton color="neutral" variant="outline" icon="i-heroicons-signal" label="Test connection" :loading="checking" :disabled="!appLinked" @click="testConnection" />
+              </div>
             </UFormField>
-            <UFormField label="Getting around" hint="Optional" help="Tell Claude how the app is laid out: key pages and their paths, demo account details, what to avoid.">
-              <UTextarea v-model="draft.app.notes" :rows="3" autoresize class="w-full" placeholder="e.g. Dashboard at /dashboard, projects at /projects/1. Use the demo workspace. Avoid /admin." @update:model-value="saveApp" />
+            <UAlert v-if="lastCheck" :color="!lastCheck.reachable || lastCheck.error ? 'error' : lastCheck.signedIn === false ? 'warning' : 'success'" variant="soft" :icon="!lastCheck.reachable || lastCheck.error ? 'i-heroicons-x-circle' : lastCheck.signedIn === false ? 'i-heroicons-exclamation-triangle' : 'i-heroicons-check-circle'"
+              :title="lastCheck.loginOpen ? 'The sign-in window is open' : !lastCheck.reachable ? 'Bower cannot reach the app' : lastCheck.error ? 'The app answered with a problem' : lastCheck.signedIn === false ? 'The app is up, but Bower is signed out' : lastCheck.autoSignedIn ? 'Connected, and signed in with the saved login' : lastCheck.signedIn ? 'Connected and signed in' : 'Connected'"
+              :description="lastCheck.loginOpen ? 'Close it, then test again.' : lastCheck.error || (lastCheck.signedIn === false ? 'Sign in below with Open browser, or save a login so Bower can sign in by itself.' : lastCheck.signedIn === null ? `The app answered${lastCheck.title ? ` (“${lastCheck.title}”)` : ''}. Sign in once below so Bower can tell when it gets signed out.` : lastCheck.title ? `Opened “${lastCheck.title}”.` : undefined)" />
+            <UFormField label="Getting around" hint="Optional" help="Tell Claude how the app is laid out: key pages and their paths, demo account details, what to avoid. Or let Claude walk the menus and write it.">
+              <UTextarea v-model="draft.app.notes" :rows="3" autoresize class="w-full" :placeholder="notesJob ? 'Claude is writing this…' : 'e.g. Dashboard at /dashboard, projects at /projects/1. Use the demo workspace. Avoid /admin.'" :disabled="!!notesJob" @update:model-value="saveApp" />
+              <div class="mt-2 flex items-center gap-2">
+                <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-sparkles" :label="draft.app.notes.trim() ? 'Rewrite with Claude' : 'Write with Claude'" :loading="!!notesJob" :disabled="!appLinked || loginOpen" @click="writeNotes" />
+                <span v-if="notesJob" class="truncate text-xs text-muted">{{ notesJob.activity.at(-1) }}</span>
+              </div>
             </UFormField>
             <UFormField label="How Claude shows the app" help="A scene can override this from the picker in its chat. Saying it in a request always wins.">
               <URadioGroup v-model="draft.app.mode" :items="appModeItems" :disabled="!draft.app.url.trim()" @update:model-value="saveApp" />
             </UFormField>
 
-            <UCard :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
+            <UCard :ui="{ body: 'p-4 sm:p-4 space-y-4' }">
               <div class="flex items-start justify-between gap-3">
-                <div>
+                <div class="space-y-1">
                   <h3 class="font-semibold text-highlighted">Sign in</h3>
-                  <p class="text-xs text-muted">Opens a browser window on the app. Sign in there and close it; screenshots then use that session. Nothing about your login is stored by Bower beyond the browser profile on this machine.</p>
+                  <p class="text-xs text-muted">Opens a browser window on the app. Sign in there as you normally would, then close the window. Screenshots use that session from then on.</p>
+                  <p class="text-xs text-muted"><span class="font-medium text-default">Tick “Remember me”</span> on the sign-in page if there is one. Without it most apps sign you out after a couple of hours.</p>
                 </div>
-                <UButton v-if="!loginOpen" color="neutral" variant="outline" icon="i-heroicons-arrow-top-right-on-square" label="Open browser" :disabled="!appLinked" @click="openLogin" />
-                <UButton v-else color="neutral" variant="soft" icon="i-heroicons-x-mark" label="Close window" @click="closeLogin" />
+                <UButton v-if="!loginOpen" color="neutral" variant="outline" icon="i-heroicons-arrow-top-right-on-square" label="Open browser" :disabled="!appLinked" class="shrink-0" @click="openLogin" />
+                <UButton v-else color="neutral" variant="soft" icon="i-heroicons-x-mark" label="Close window" class="shrink-0" @click="closeLogin" />
+              </div>
+              <div v-if="signInStatus" class="flex items-center gap-2 text-sm">
+                <UIcon :name="signInStatus.icon" :class="['size-4 shrink-0', { 'text-success': signInStatus.color === 'success', 'text-warning': signInStatus.color === 'warning', 'text-muted': signInStatus.color === 'neutral' }]" />
+                <span class="text-default">{{ signInStatus.text }}</span>
+                <UButton size="xs" color="neutral" variant="link" label="Check now" :loading="checking" :disabled="loginOpen" @click="testConnection" />
+              </div>
+
+              <div v-if="session?.savedSupported" class="space-y-2 border-t border-default pt-4">
+                <h4 class="text-sm font-medium text-highlighted">Saved login <span class="font-normal text-muted">(optional)</span></h4>
+                <p class="text-xs text-muted">Bower signs in by itself when the session runs out. The password is encrypted for your Windows account, stays on this computer and is never shown to Claude or included when you export the project. A demo or test account is best.</p>
+                <div v-if="session.saved" class="flex items-center gap-2 text-sm">
+                  <UIcon name="i-heroicons-key" class="size-4 text-muted" />
+                  <span>Saved for <span class="font-medium">{{ session.saved.user }}</span></span>
+                  <UButton size="xs" color="neutral" variant="link" label="Remove" @click="removeCredentials" />
+                </div>
+                <div v-else class="grid grid-cols-[1fr_1fr_auto] gap-2">
+                  <UInput v-model="credentials.user" size="sm" placeholder="Email or username" autocomplete="off" />
+                  <UInput v-model="credentials.password" size="sm" type="password" placeholder="Password" autocomplete="new-password" @keydown.enter="saveCredentials" />
+                  <UButton size="sm" color="neutral" variant="outline" icon="i-heroicons-key" label="Save" :loading="credentials.busy" :disabled="!credentials.user.trim() || !credentials.password" @click="saveCredentials" />
+                </div>
               </div>
             </UCard>
           </div>
@@ -370,7 +519,9 @@ function download(format: 'srt' | 'vtt') {
           <!-- Screenshots -->
           <div v-else-if="tab === 'shots'" class="space-y-5">
             <UAlert v-if="!appLinked" color="neutral" variant="soft" icon="i-heroicons-information-circle" title="Set the app address first" description="Screenshots are taken from the running product. Add its address in the App tab." :actions="[{ label: 'Go to App', color: 'neutral', variant: 'outline', onClick: () => { tab = 'app' } }]" />
+            <UAlert v-else-if="recording" color="info" variant="soft" icon="i-heroicons-video-camera" :title="`Recording · ${recording.steps.length} step${recording.steps.length === 1 ? '' : 's'}`" description="Click through the app in the window that opened. Use “Capture this screen” in its corner bar wherever you want a screenshot, then Finish." :actions="[{ label: 'Finish', color: 'info', variant: 'solid', onClick: finishRecording }]" />
             <UAlert v-else-if="loginOpen" color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" title="The sign-in window is open" description="Chrome cannot use the session twice at once. Close it to capture." :actions="[{ label: 'Close window', color: 'warning', variant: 'outline', onClick: closeLogin }]" />
+            <UAlert v-else-if="session?.signedIn === false && !session.saved" color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" title="Bower is signed out of the app" description="Pages behind sign-in will fail until you sign in again." :actions="[{ label: 'Go to App', color: 'warning', variant: 'outline', onClick: () => { tab = 'app' } }]" />
             <UCard :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
               <h3 class="font-semibold text-highlighted">Take a screenshot</h3>
               <div class="grid grid-cols-[1fr_11rem] gap-2">
@@ -381,14 +532,27 @@ function download(format: 'srt' | 'vtt') {
                   <USelect v-model="capture.size" :items="sizeItems" size="sm" class="w-full" />
                 </UFormField>
               </div>
-              <UFormField label="Steps before capturing" size="sm" hint="Optional, JSON">
-                <UTextarea v-model="capture.steps" :rows="2" autoresize size="sm" class="w-full font-mono text-xs" placeholder='[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' />
+              <UFormField label="Steps before capturing" size="sm" hint="Optional" help="Record them by clicking through the app, or write them as JSON.">
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2">
+                    <UButton size="sm" color="neutral" variant="outline" icon="i-heroicons-video-camera" label="Record steps" :loading="!!recording" :disabled="!appLinked || (loginOpen && !recording)" @click="startRecording" />
+                    <UButton v-if="capture.steps.trim()" size="sm" color="neutral" variant="ghost" icon="i-heroicons-x-mark" label="Clear" @click="capture.steps = ''" />
+                  </div>
+                  <ol v-if="stepsPreview?.items?.length" class="list-decimal space-y-0.5 rounded-md bg-elevated/60 py-2 pr-3 pl-8 text-xs text-default">
+                    <li v-for="(s, i) in stepsPreview.items" :key="i">{{ s }}</li>
+                  </ol>
+                  <p v-else-if="stepsPreview?.error" class="text-xs text-warning">{{ stepsPreview.error }}</p>
+                  <details class="text-xs">
+                    <summary class="cursor-pointer text-muted">{{ capture.steps.trim() ? 'Edit as JSON' : 'Or write them as JSON' }}</summary>
+                    <UTextarea v-model="capture.steps" :rows="2" autoresize size="sm" class="mt-2 w-full font-mono text-xs" placeholder='[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' />
+                  </details>
+                </div>
               </UFormField>
               <div class="flex items-center justify-between gap-3">
                 <USwitch v-model="capture.fullPage" label="Whole page, not just the first screen" size="sm" />
                 <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen" @click="takeShot" />
               </div>
-              <p class="text-xs text-muted">Steps drive the page first: click, type, select, wait, scroll, hover, press, goto, and shot to save a PNG along the way. Claude can take its own with <code>node bower.mjs shot &lt;page&gt;</code> while it works on a scene.</p>
+              <p class="text-xs text-muted">Claude takes its own screenshots while it works on a scene, so this is only needed when you want to pick the screens yourself.</p>
             </UCard>
 
             <div v-if="shots.length" class="grid grid-cols-3 gap-3">
