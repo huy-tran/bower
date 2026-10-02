@@ -237,13 +237,21 @@ const formatLabel = computed(() => {
   return Math.abs(r - 16 / 9) < 0.01 ? '16:9' : Math.abs(r - 9 / 16) < 0.01 ? '9:16' : Math.abs(r - 1) < 0.01 ? '1:1' : Math.abs(r - 0.8) < 0.01 ? '4:5' : `${p.width}×${p.height}`
 })
 
+// Bower itself, for every project on this computer.
+const bowerMenu = computed<DropdownMenuItem[][]>(() => [[
+  { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show('claude') },
+  { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
+  { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
+], [
+  { label: `Bower ${appVersion}`, icon: 'i-lucide-bird', disabled: true }
+]])
+
 const projectMenu = computed<DropdownMenuItem[][]>(() => {
   const has = !!project.value
   const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
   return [[
     { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', disabled: !has, onSelect: () => (storyOpen.value = true) },
     { label: 'History…', icon: 'i-heroicons-clock', disabled: !has, onSelect: () => (historyOpen.value = true) },
-    { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show() },
     { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', disabled: !has, onSelect: () => openSettings() },
     { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', disabled: !has, onSelect: duplicateProject },
     {
@@ -259,7 +267,6 @@ const projectMenu = computed<DropdownMenuItem[][]>(() => {
     { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', disabled: !has, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/player?download=1` } },
     { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', disabled: !has, onSelect: () => { window.open(`/api/projects/${project.value!.id}/player`, '_blank') } }
   ], [
-    { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) },
     { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', disabled: !has, onSelect: () => (deleteOpen.value = true) }
   ]]
 })
@@ -304,13 +311,16 @@ async function copyPath() {
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-default shadow-xl ring-1 ring-default">
       <!-- Header -->
       <header class="flex items-center gap-3 border-b border-default px-4 py-3">
-        <div class="flex items-center gap-2 pr-2">
-          <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
-          <div class="flex flex-col gap-0.5">
-            <span class="text-lg leading-none font-semibold tracking-tight text-highlighted">Bower</span>
-            <span class="text-[11px] leading-none text-muted tabular-nums">{{ appVersion }}</span>
-          </div>
-        </div>
+        <!-- The logo is the one place for things that are not about the open project. -->
+        <UDropdownMenu :items="bowerMenu" :content="{ align: 'start' }">
+          <button type="button" class="-my-1 flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary" aria-label="Bower menu">
+            <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
+            <div class="flex flex-col gap-0.5">
+              <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
+              <span class="text-[11px] leading-none text-muted tabular-nums">{{ appVersion }}</span>
+            </div>
+          </button>
+        </UDropdownMenu>
         <ProjectPicker @new="openNew" />
         <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />
         <UButton color="neutral" variant="outline" icon="i-heroicons-plus" label="New project" @click="openNew" />
@@ -353,9 +363,6 @@ async function copyPath() {
             <UButton color="neutral" variant="outline" icon="i-heroicons-cog-6-tooth" label="Settings" :disabled="!project" @click="openSettings()" />
           </UTooltip>
           <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document" label="Copy path" :disabled="!selected" @click="copyPath" />
-          <UTooltip text="Bower settings: Claude Code, defaults for new projects, and apps">
-            <UButton color="neutral" variant="ghost" icon="i-heroicons-adjustments-horizontal" aria-label="Bower settings" @click="bower.show()" />
-          </UTooltip>
           <UColorModeButton />
           <UButton icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
         </div>
