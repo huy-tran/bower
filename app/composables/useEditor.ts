@@ -337,6 +337,15 @@ async function openProject(id: string) {
   view.value = { from: 0, to: 1 }
   ensureAudio()
   try { localStorage.setItem('bower:project', id) } catch {}
+  rememberRecent(id)
+}
+
+// Recently opened projects, newest first, for the Bower menu (this browser only).
+const recentIds = ref<string[]>([])
+try { recentIds.value = JSON.parse(localStorage.getItem('bower:recent') || '[]') } catch {}
+function rememberRecent(id: string) {
+  recentIds.value = [id, ...recentIds.value.filter(x => x !== id)].slice(0, 8)
+  try { localStorage.setItem('bower:recent', JSON.stringify(recentIds.value)) } catch {}
 }
 
 async function refresh() {
@@ -372,6 +381,6 @@ export function useEditor() {
     mode, playing, time, rate, loop, view, layers, active, caption, marks, clipMarks,
     timelineDuration, timelineStart, videoTime,
     play, pause, toggle, seek, setRate, setLoop, setView, setMode, select,
-    loadProjects, openProject, refresh, setProject, closeProject
+    loadProjects, openProject, refresh, setProject, closeProject, recentIds: readonly(recentIds)
   }
 }

@@ -238,41 +238,56 @@ const formatLabel = computed(() => {
 })
 
 // Bower itself, for every project on this computer.
-// The Bower menu on the logo: projects (new, import), actions on the open project under its name, then Bower
-// itself. Storyboard and Settings keep their own toolbar buttons.
+// The Bower menu on the logo: choosing a project (new, import, recent, all), then Bower itself.
+const allProjectsOpen = ref(false)
 const bowerMenu = computed<DropdownMenuItem[][]>(() => {
-  const p = project.value
-  const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
-  const groups: DropdownMenuItem[][] = [[
+  const names = new Map(projects.value.map(p => [p.id, p]))
+  const recent = ed.recentIds.value.filter(id => id !== project.value?.id && names.has(id)).slice(0, 6)
+  return [[
     { label: 'New project…', icon: 'i-heroicons-plus', onSelect: openNew },
     { label: 'Import project…', icon: 'i-heroicons-arrow-up-tray', onSelect: () => importInput.value?.click() }
-  ]]
-  if (p) {
-    groups.push([
-      { label: p.name, type: 'label' },
-      { label: 'History…', icon: 'i-heroicons-clock', onSelect: () => (historyOpen.value = true) },
-      { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', onSelect: duplicateProject },
-      {
-        label: 'New version for social…', icon: 'i-heroicons-device-phone-mobile',
-        children: [formats.map(f => ({
-          label: { '16:9': 'Landscape 16:9', '9:16': 'Vertical 9:16 (Reels, TikTok, Shorts)', '1:1': 'Square 1:1', '4:5': 'Portrait 4:5 (feed)' }[f]!,
-          onSelect: () => adapt(f)
-        }))]
-      },
-      { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', onSelect: () => { window.location.href = `/api/projects/${p.id}/export` } },
-      { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', onSelect: () => { window.location.href = `/api/projects/${p.id}/player?download=1` } },
-      { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', onSelect: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } },
-      { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', onSelect: () => (deleteOpen.value = true) }
-    ])
-  }
-  groups.push([
+  ], [
+    {
+      label: 'Recent projects', icon: 'i-heroicons-clock', disabled: !recent.length,
+      children: [recent.map(id => ({ label: names.get(id)!.name, description: names.get(id)!.folder || undefined, icon: 'i-heroicons-film', onSelect: () => ed.openProject(id) }))]
+    },
+    { label: 'All projects…', icon: 'i-heroicons-squares-2x2', onSelect: () => (allProjectsOpen.value = true) }
+  ], [
     { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show('claude') },
     { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
     { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
   ], [
     { label: 'About Bower', icon: 'i-heroicons-information-circle', onSelect: () => (aboutOpen.value = true) }
-  ])
-  return groups
+  ]]
+})
+
+// The open project's menu, on its name in the toolbar.
+const projectCrumbs = computed(() => project.value?.folder ? project.value.folder.split('/') : [])
+const projectMenu = computed<DropdownMenuItem[][]>(() => {
+  const p = project.value
+  if (!p) return []
+  const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
+  return [[
+    { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', onSelect: () => openSettings() },
+    { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', onSelect: () => (storyOpen.value = true) },
+    { label: 'History…', icon: 'i-heroicons-clock', onSelect: () => (historyOpen.value = true) }
+  ], [
+    { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', onSelect: duplicateProject },
+    {
+      label: 'New version for social…', icon: 'i-heroicons-device-phone-mobile',
+      children: [formats.map(f => ({
+        label: { '16:9': 'Landscape 16:9', '9:16': 'Vertical 9:16 (Reels, TikTok, Shorts)', '1:1': 'Square 1:1', '4:5': 'Portrait 4:5 (feed)' }[f]!,
+        onSelect: () => adapt(f)
+      }))]
+    }
+  ], [
+    { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', onSelect: () => { window.location.href = `/api/projects/${p.id}/export` } },
+    { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', onSelect: () => { window.location.href = `/api/projects/${p.id}/player?download=1` } },
+    { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', onSelect: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } }
+  ], [
+    { label: 'Open another project…', icon: 'i-heroicons-arrows-right-left', onSelect: () => (allProjectsOpen.value = true) },
+    { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', onSelect: () => (deleteOpen.value = true) }
+  ]]
 })
 
 async function importProject(e: Event) {
@@ -322,7 +337,16 @@ async function copyPath() {
             <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
           </button>
         </UDropdownMenu>
-        <ProjectPicker @new="openNew" />
+        <UDropdownMenu v-if="project" :items="projectMenu" :content="{ align: 'start' }" :ui="{ content: 'min-w-60' }">
+          <UButton color="neutral" variant="outline" class="max-w-80 justify-start" trailing-icon="i-heroicons-chevron-down" :ui="{ trailingIcon: 'ml-1' }" aria-label="Project menu">
+            <span class="flex min-w-0 items-center gap-1 truncate">
+              <template v-for="c in projectCrumbs" :key="c"><span class="text-muted">{{ c }}</span><span class="text-dimmed">/</span></template>
+              <span class="truncate text-highlighted">{{ project.name }}</span>
+            </span>
+          </UButton>
+        </UDropdownMenu>
+        <UButton v-else color="neutral" variant="outline" icon="i-heroicons-squares-2x2" label="Choose a project" @click="allProjectsOpen = true" />
+        <ProjectPicker v-model:open="allProjectsOpen" @new="openNew" />
         <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />
         <input ref="importInput" type="file" accept=".zip,application/zip" class="hidden" @change="importProject">
         <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />

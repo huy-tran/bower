@@ -1,13 +1,13 @@
 <script setup lang="ts">
-// Header control: the open project with its folder path, and a popover with the folder tree, search and folder actions.
+// "All projects" (from the Bower menu): every project in its folder tree, with search and folder actions.
 import ProjectTree from './ProjectTree.vue'
 
 const emit = defineEmits<{ new: [] }>()
+const open = defineModel<boolean>('open', { default: false })
 const ed = useEditor()
 const { project, projects } = ed
 const fo = useFolders()
 
-const open = ref(false)
 const search = ref('')
 const openFolders = reactive(new Set<string>())
 try { for (const f of JSON.parse(localStorage.getItem('bower:folders-open') || '[]')) openFolders.add(f) } catch {}
@@ -22,8 +22,6 @@ watch(() => project.value?.folder, (f) => {
   for (let i = 1; i <= parts.length; i++) openFolders.add(parts.slice(0, i).join('/'))
 }, { immediate: true })
 
-const label = computed(() => project.value ? project.value.name : 'Choose a project')
-const crumbs = computed(() => project.value?.folder ? project.value.folder.split('/') : [])
 
 const matches = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -65,15 +63,9 @@ const dialogTitle = computed(() => ({ create: dialog.path ? `New folder in ${fol
 </script>
 
 <template>
-  <UPopover v-model:open="open" :content="{ align: 'start' }">
-    <UButton color="neutral" variant="outline" class="w-72 justify-start" trailing-icon="i-heroicons-chevron-up-down" :ui="{ trailingIcon: 'ml-auto' }">
-      <span class="flex min-w-0 items-center gap-1 truncate">
-        <template v-for="c in crumbs" :key="c"><span class="text-muted">{{ c }}</span><span class="text-dimmed">/</span></template>
-        <span class="truncate" :class="project ? 'text-highlighted' : 'text-muted'">{{ label }}</span>
-      </span>
-    </UButton>
-    <template #content>
-      <div class="w-96">
+  <UModal v-model:open="open" title="All projects" :ui="{ content: 'max-w-xl', body: 'p-0 sm:p-0' }">
+    <template #body>
+      <div>
         <div class="flex items-center gap-2 border-b border-default p-2">
           <UInput v-model="search" icon="i-heroicons-magnifying-glass" placeholder="Find a project" size="sm" class="flex-1" autofocus />
           <UTooltip text="New folder at the top level">
@@ -97,7 +89,7 @@ const dialogTitle = computed(() => ({ create: dialog.path ? `New folder in ${fol
         </div>
       </div>
     </template>
-  </UPopover>
+  </UModal>
 
   <UModal v-model:open="dialog.open" :title="dialogTitle" :description="dialog.mode === 'delete' ? 'Projects and subfolders inside it move up one level. Nothing is deleted from disk.' : undefined" :ui="{ footer: 'justify-end' }">
     <template v-if="dialog.mode !== 'delete'" #body>
