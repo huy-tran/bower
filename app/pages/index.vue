@@ -274,6 +274,26 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => {
 
 // The open project's menu, on its name in the toolbar.
 const projectCrumbs = computed(() => project.value?.folder ? project.value.folder.split('/') : [])
+// Desktop app: the native title bar is hidden, so the page draws a draggable strip where it was, and the
+// window's minimise, maximise and close buttons (drawn by Windows over the strip's right end) take the page's
+// colours, following the theme. Colours are read as the browser resolves them (oklch included) via a canvas.
+const titleBar = bowerDesktop()?.titleBar ?? null
+function hexOf(css: string) {
+  const c = document.createElement('canvas').getContext('2d')!
+  c.fillStyle = css
+  c.fillRect(0, 0, 1, 1)
+  const [r, g, b] = c.getImageData(0, 0, 1, 1).data
+  return `#${[r, g, b].map(n => n!.toString(16).padStart(2, '0')).join('')}`
+}
+function syncTitleBar() {
+  const desktop = bowerDesktop()
+  if (!titleBar || !desktop?.setTitleBarColors) return
+  const cs = getComputedStyle(document.body)
+  desktop.setTitleBarColors(hexOf(cs.backgroundColor), hexOf(getComputedStyle(document.documentElement).getPropertyValue('--ui-text-muted').trim() || '#57534e'))
+}
+onMounted(() => { if (titleBar) nextTick(syncTitleBar) })
+watch(() => colorMode.value, () => { if (titleBar) setTimeout(syncTitleBar, 50) })
+
 // The command palette (Ctrl+K): the same actions as the toolbar and menus, plus jumping to a scene, a project or a
 // settings tab. Each entry's `run` is what the matching button does.
 const paletteOpen = ref(false)
@@ -393,7 +413,12 @@ async function copyProjectPath() {
 </script>
 
 <template>
-  <div class="flex h-full flex-col p-3 lg:p-5">
+  <div class="flex h-full flex-col p-3 lg:p-5" :class="{ 'pt-0 lg:pt-0': titleBar }">
+    <!-- Desktop app: the strip where the native title bar was. Drag it to move the window; Windows draws its
+         window buttons over the right end, a Mac its traffic lights at the left. -->
+    <div v-if="titleBar" class="app-drag -mx-3 flex shrink-0 items-center justify-center lg:-mx-5" :style="{ height: `${titleBar.height}px` }">
+      <span class="truncate px-40 text-xs text-muted select-none">{{ project ? `${project.name} · Bower` : 'Bower' }}</span>
+    </div>
     <UAlert
       v-if="health && (!health.claude.installed || !health.claude.loggedIn)"
       class="mb-3"
@@ -407,7 +432,7 @@ async function copyProjectPath() {
     />
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-default shadow-xl ring-1 ring-default">
       <!-- Header -->
-      <header class="flex items-center gap-3 border-b border-default px-4 py-3">
+      <header class="flex items-center gap-3 border-b border-default px-4 py-3" :class="{ 'app-drag': titleBar }">
         <!-- The logo is the one place for things that are not about the open project. -->
         <UDropdownMenu :items="bowerMenu" :content="{ align: 'start' }">
           <button type="button" class="-my-1 flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary" aria-label="Bower menu">

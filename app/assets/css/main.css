@@ -54,3 +54,8 @@
 
 html, body, #__nuxt { height: 100%; }
 body { background: var(--ui-bg-muted); }
+
+/* Desktop app: areas that move the window when dragged (the hidden title bar's strip and the toolbar). Controls inside
+   them stay clickable. */
+.app-drag { -webkit-app-region: drag; app-region: drag; }
+.app-drag :is(button, a, input, textarea, select, [role="button"], [role="tab"], [role="combobox"], [tabindex]) { -webkit-app-region: no-drag; app-region: no-drag; }

@@ -4,7 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, wr
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron'
 import updater from 'electron-updater'
 
 // Bower's desktop shell. Packaged, it starts the bundled Nuxt server on a localhost port
@@ -156,14 +156,28 @@ async function startServer() {
   throw new Error('The server did not start within 30 seconds')
 }
 
+// No native menu bar or title bar: the page draws its own top strip (app/pages/index.vue) and, on Windows and Linux,
+// the system's minimise, maximise and close buttons are drawn over its top-right corner in the page's colours
+// (bower:title-bar). On a Mac the traffic lights sit inset in the same strip. The strip height must match the page.
+const TITLE_BAR_HEIGHT = 36
+const MAC = process.platform === 'darwin'
+const windowChrome = MAC
+  ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 11 } }
+  : { titleBarStyle: 'hidden', titleBarOverlay: { color: '#f4f1ea', symbolColor: '#57534e', height: TITLE_BAR_HEIGHT } }
+
 function createWindow(url) {
+  // BOWER_TEST_OFFSCREEN opens the window off screen and without focus, so tests can capture it (PrintWindow)
+  // without it appearing over anything.
+  const offscreen = process.env.BOWER_TEST_OFFSCREEN === '1'
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 960,
     minHeight: 600,
+    ...(offscreen && { x: -4000, y: 0 }),
     title: 'Bower',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f4f1ea',
+    ...windowChrome,
     show: false,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(import.meta.dirname, 'preload.cjs') }
   })
@@ -188,7 +202,14 @@ function createWindow(url) {
     e.preventDefault()
     shell.openExternal(u)
   })
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => offscreen ? win.showInactive() : win.show())
+  // Without a menu, Electron's own shortcuts go too; keep the developer tools reachable for support.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i'))) {
+      win.webContents.toggleDevTools()
+      e.preventDefault()
+    }
+  })
   win.loadURL(url)
   return win
 }
@@ -196,6 +217,14 @@ function createWindow(url) {
 // Only Bower's own pages may use what preload.cjs offers.
 let appOrigin = null
 const fromApp = e => new URL(e.senderFrame.url).origin === appOrigin
+
+// The page reports its background and text colours (light or dark theme), and the window buttons follow them.
+ipcMain.handle('bower:title-bar', (e, { color, symbolColor } = {}) => {
+  if (!fromApp(e) || MAC) return
+  const win = BrowserWindow.fromWebContents(e.sender)
+  const hex = v => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : undefined
+  if (win && hex(color)) win.setTitleBarOverlay({ color: hex(color), symbolColor: hex(symbolColor) ?? '#57534e', height: TITLE_BAR_HEIGHT })
+})
 
 // Native folder chooser for "Browse..." (linked codebases).
 ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
@@ -268,6 +297,9 @@ app.on('window-all-closed', () => app.quit())
 
 app.whenReady().then(async () => {
   if (!primary) return // another Bower is open; the second-instance event focuses it
+  // No File / Edit / View / Window bar. Copy, paste, undo and select-all still work in text fields (Chromium
+  // handles them itself); a Mac keeps its standard menu, which lives in the system menu bar.
+  if (!MAC) Menu.setApplicationMenu(null)
   try {
     createWindow(app.isPackaged ? await startServer() : DEV_URL)
     if (app.isPackaged) checkForUpdates()

@@ -11,6 +11,9 @@ interface BowerDesktop {
   updateState(): Promise<DesktopUpdateInfo | null>
   onUpdate(cb: (update: DesktopUpdateInfo | null) => void): () => void
   installUpdate(): Promise<void>
+  // The hidden native title bar: the page draws a draggable strip this tall at the top.
+  titleBar?: { height: number, platform: string }
+  setTitleBarColors?(color: string, symbolColor: string): Promise<void>
 }
 
 export function bowerDesktop(): BowerDesktop | undefined {
