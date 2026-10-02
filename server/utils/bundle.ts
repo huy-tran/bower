@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { unzipSync, zipSync, strToU8, strFromU8, type Zippable } from 'fflate'
-import { addVersion, createProject, loadProject, projectDir, saveProject, type Project } from './store'
+import { createApp } from './apps'
+import { addVersion, APP_MODES, createProject, loadProject, projectDir, saveProject, type Project } from './store'
 
 // Project bundles hold what a teammate needs to keep working: project.json, scenes, audio and assets.
 // Renders, versions and chat history stay on the machine they were made on.
@@ -21,7 +22,9 @@ export async function exportBundle(pid: string) {
   const p = await loadProject(pid)
   const root = projectDir(pid)
   const files: Zippable = {
-    'project.json': strToU8(JSON.stringify({ ...p, codebases: [], format: 'bower-project@1' }, null, 2))
+    // The shared app travels as its address and notes (the importer links or creates the same app); its
+    // repositories and sign-in stay on this machine.
+    'project.json': strToU8(JSON.stringify({ ...p, codebases: [], appCodebases: undefined, app: p.app ? { url: p.app.url, notes: p.app.notes, mode: p.app.mode } : null, format: 'bower-project@1' }, null, 2))
   }
   for (const d of INCLUDE) {
     for (const f of await walk(join(root, d))) {
@@ -77,6 +80,12 @@ export async function importBundle(zip: Uint8Array) {
     visualChecks: src.visualChecks ?? true,
     // The kit itself is not shared, but its copy in brand/ still guides Claude.
     brandKitId: null
+  }
+  // The same product on this machine (matched by address), or a new shared app for it. Sign-in is per machine.
+  const srcApp = (src as any).app
+  if (srcApp?.url) {
+    const shared = await createApp({ url: String(srcApp.url), notes: String(srcApp.notes ?? '') }).catch(() => null)
+    if (shared) next.app = { id: shared.id, name: shared.name, url: shared.url, notes: shared.notes, mode: APP_MODES.includes(srcApp.mode) ? srcApp.mode : 'auto' }
   }
   await saveProject(next)
   return next

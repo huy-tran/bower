@@ -1,1 +1,1 @@
-export default defineEventHandler(event => ({ open: loginOpen(getRouterParam(event, 'pid')!) }))
+export default defineEventHandler(async event => ({ open: await loginOpen(getRouterParam(event, 'pid')!) }))

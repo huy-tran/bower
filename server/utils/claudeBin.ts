@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptions } from 'node:child_process'
-import { existsSync, promises as fs, statSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join, resolve } from 'node:path'
-import { STORAGE } from './paths'
+import { delimiter, dirname, join } from 'node:path'
+import { patchSettings, readSettings } from './settings'
 
 // Where Claude Code lives differs per machine: the native installer, npm (global or a custom prefix), Homebrew,
 // or somewhere the user chose. Every place that starts Claude goes through here. Order:
@@ -12,21 +12,9 @@ import { STORAGE } from './paths'
 // 4. the usual install folders
 // npm installs a claude.cmd shim on Windows, which Node cannot start directly, so that is run as
 // `node <cli.js>` with the Node running Bower (in the desktop app, Electron running as Node).
-const SETTINGS = resolve(STORAGE, '..', 'settings.json')
 const WIN = process.platform === 'win32'
 
 export interface ClaudeBin { cmd: string, pre: string[], path: string, source: 'setting' | 'env' | 'path' | 'folder' }
-
-async function readSettings(): Promise<{ claudePath?: string }> {
-  try { return JSON.parse(await fs.readFile(SETTINGS, 'utf8')) } catch { return {} }
-}
-
-async function writeSettings(patch: Record<string, unknown>) {
-  const next = { ...await readSettings(), ...patch }
-  for (const k of Object.keys(next)) if (next[k as keyof typeof next] === undefined || next[k as keyof typeof next] === '') delete next[k as keyof typeof next]
-  await fs.mkdir(dirname(SETTINGS), { recursive: true })
-  await fs.writeFile(SETTINGS, JSON.stringify(next, null, 2))
-}
 
 const isFile = (p: string) => { try { return statSync(p).isFile() } catch { return false } }
 
@@ -90,14 +78,14 @@ export async function getClaudeSetting() {
 export async function setClaudePath(path: string) {
   const t = path.trim()
   if (!t) {
-    await writeSettings({ claudePath: undefined })
+    await patchSettings({ claudePath: null })
     return findClaude(true)
   }
   const file = inspect(t)
   if (!file) throw createError({ statusCode: 422, message: `No Claude Code program at ${t}. Choose the folder that holds ${WIN ? 'claude.exe' : 'claude'}, or the program itself.` })
   const version = await claudeVersion(launcher(file, 'setting'))
   if (!version) throw createError({ statusCode: 422, message: `${file} did not answer like Claude Code (claude --version failed).` })
-  await writeSettings({ claudePath: t })
+  await patchSettings({ claudePath: t })
   return findClaude(true)
 }
 

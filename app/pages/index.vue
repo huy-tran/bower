@@ -171,6 +171,9 @@ async function onDrop(e: DragEvent) {
 
 // Setup progress for the header chip; refreshed when the project changes or the settings close.
 const setup = useSetup()
+const bower = useBowerSettings()
+// Leaving Bower settings may have changed the open project's app (renamed, moved): reload it.
+watch(bower.open, async (o) => { if (!o && project.value) { ed.setProject(await $fetch(`/api/projects/${project.value.id}`)); setup.checkClaude() } })
 onMounted(() => setup.checkClaude())
 watch([() => project.value?.id, settingsOpen], ([id, open]) => { if (id && !open) setup.loadSession(id, !!project.value?.app) }, { immediate: true })
 
@@ -240,6 +243,7 @@ const projectMenu = computed<DropdownMenuItem[][]>(() => {
   return [[
     { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', disabled: !has, onSelect: () => (storyOpen.value = true) },
     { label: 'History…', icon: 'i-heroicons-clock', disabled: !has, onSelect: () => (historyOpen.value = true) },
+    { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show() },
     { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', disabled: !has, onSelect: () => openSettings() },
     { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', disabled: !has, onSelect: duplicateProject },
     {
@@ -336,16 +340,22 @@ async function copyPath() {
             </UTooltip>
           </UFieldGroup>
           <NarrationStatus />
-          <UTooltip v-if="project && setup.done.value < setup.total.value" :text="setup.blocked.value ? 'Claude Code needs attention before Claude can build scenes' : 'Finish setting up this project so videos look like your real product'">
-            <UButton :color="setup.blocked.value ? 'warning' : 'primary'" variant="soft" :icon="setup.blocked.value ? 'i-heroicons-exclamation-triangle' : 'i-heroicons-rocket-launch'" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
+          <UTooltip v-if="setup.blocked.value" text="Claude cannot build scenes until Claude Code is installed and signed in">
+            <UButton color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" label="Set up Claude Code" @click="bower.show('claude')" />
+          </UTooltip>
+          <UTooltip v-else-if="project && setup.done.value < setup.total.value" text="Finish setting up this project so videos look like your real product">
+            <UButton color="primary" variant="soft" icon="i-heroicons-rocket-launch" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
           </UTooltip>
           <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
             <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />
           </UTooltip>
-          <UTooltip text="Name, art direction, brand kit, codebase, narrator and captions">
+          <UTooltip text="This project: name, art direction, brand kit, app, code, narrator and captions">
             <UButton color="neutral" variant="outline" icon="i-heroicons-cog-6-tooth" label="Settings" :disabled="!project" @click="openSettings()" />
           </UTooltip>
           <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document" label="Copy path" :disabled="!selected" @click="copyPath" />
+          <UTooltip text="Bower settings: Claude Code, defaults for new projects, and apps">
+            <UButton color="neutral" variant="ghost" icon="i-heroicons-adjustments-horizontal" aria-label="Bower settings" @click="bower.show()" />
+          </UTooltip>
           <UColorModeButton />
           <UButton icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
         </div>
@@ -438,6 +448,7 @@ async function copyPath() {
     <SoundPanel v-if="project" v-model:open="soundOpen" @settings="openSettings('sound')" />
     <TrashModal v-model:open="trashOpen" />
     <ProjectSettingsModal v-if="project" v-model:open="settingsOpen" v-model:tab="settingsTab" />
+    <BowerSettingsModal />
     <StoryboardModal v-if="project" v-model:open="storyOpen" />
     <HistoryModal v-if="project" v-model:open="historyOpen" />
 

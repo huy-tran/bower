@@ -3,7 +3,9 @@ import { join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { writeClaudeMd } from './claudeMd'
 
+import { getApp, migrateLegacyApp } from './apps'
 import { STORAGE } from './paths'
+import { readSettings } from './settings'
 
 export interface Section { start: number, end: number, label: string, energy: number }
 
@@ -64,11 +66,13 @@ export interface Project {
   captions: CaptionSettings
   brandKitId: string | null
   visualChecks: boolean
-  // A local code repository Claude may read (via `claude --add-dir`) to base scenes on the real product.
-  // Machine-specific, so it is not exported.
+  // Local code repositories Claude may read (via `claude --add-dir`) to base scenes on the real product: this
+  // project's own. Machine-specific, so they are not exported.
   codebases: Codebase[]
-  // The running product, for screenshots: its base URL and notes on how to get around it.
+  // The running product, a shared app (apps.ts) filled in when the project loads; on disk only `appId` and
+  // `appMode` are kept. Its repositories come along as `appCodebases` (read-only here, edited on the app).
   app: ProductApp | null
+  appCodebases: Codebase[]
   narrator: Narrator
   // Virtual folder the project is filed under, like "Clients/Acme" ('' = top level). Storage on disk stays flat.
   folder: string
@@ -86,7 +90,13 @@ export interface Codebase { label: string, path: string, notes: string }
 // Projects that linked an app before this setting existed have no mode, which means "auto".
 export type AppMode = 'shots' | 'rebuild' | 'auto'
 export const APP_MODES: AppMode[] = ['shots', 'rebuild', 'auto']
-export interface ProductApp { url: string, notes: string, mode?: AppMode }
+export interface ProductApp { id: string, name: string, url: string, notes: string, mode: AppMode }
+
+// Every repository Claude may read for this project: the app's, then the project's own.
+export function allCodebases(p: Project) {
+  const seen = new Set<string>()
+  return [...p.appCodebases, ...p.codebases].filter(c => !seen.has(c.path.toLowerCase()) && seen.add(c.path.toLowerCase()))
+}
 
 export interface SceneView {
   id: string
@@ -155,11 +165,19 @@ export async function listProjects() {
 }
 
 export async function loadProject(pid: string): Promise<Project> {
-  const p = await readJson<Project | null>(join(projectDir(pid), 'project.json'), null)
+  let p = await readJson<any>(join(projectDir(pid), 'project.json'), null)
   if (!p) throw createError({ statusCode: 404, message: 'Project not found' })
+  // A project from before shared apps: link it to one first (see apps.ts).
+  if (!p.appId && p.app?.url && await migrateLegacyApp(pid, p)) p = await readJson<any>(join(projectDir(pid), 'project.json'), p)
+  const shared = p.appId ? await getApp(p.appId) : null
+  const app: ProductApp | null = shared ? { id: shared.id, name: shared.name, url: shared.url, notes: shared.notes, mode: APP_MODES.includes(p.appMode) ? p.appMode : 'auto' } : null
+  delete p.appId
+  delete p.appMode
   return {
-    width: 1920, height: 1080, fps: 30, artDirection: '', audio: null, clips: [], brandKitId: null, visualChecks: true, app: null,
+    width: 1920, height: 1080, fps: 30, artDirection: '', audio: null, clips: [], brandKitId: null, visualChecks: true,
     ...p,
+    app,
+    appCodebases: shared?.codebases ?? [],
     // Projects saved before multi-repo support had a single `codebase`.
     codebases: Array.isArray(p.codebases) ? p.codebases : (p as any).codebase?.path ? [{ label: 'Codebase', notes: '', ...(p as any).codebase }] : [],
     folder: normalizeFolder(p.folder),
@@ -171,7 +189,9 @@ export async function loadProject(pid: string): Promise<Project> {
 
 export async function saveProject(p: Project) {
   await syncVoiceClips(p)
-  await writeJson(join(projectDir(p.id), 'project.json'), p)
+  // The shared app is stored by reference: its id and how this project shows it.
+  const { app, appCodebases, ...rest } = p
+  await writeJson(join(projectDir(p.id), 'project.json'), { ...rest, appId: app?.id ?? null, appMode: app?.mode ?? null })
   await writeClaudeMd(p)
 }
 
@@ -301,9 +321,11 @@ export function blankScene(title: string, duration = 3000, extra: Record<string,
 export async function createProject(name: string, scenes?: { title: string, html: string }[], size?: { width: number, height: number }, folder = '') {
   let id = slugify(name)
   while (existsSync(join(STORAGE, id))) id = `${slugify(name)}-${randomBytes(2).toString('hex')}`
+  // New projects start from the defaults in Bower settings.
+  const d = (await readSettings()).defaults
   const p: Project = {
-    id, name, artDirection: '', width: size?.width ?? 1920, height: size?.height ?? 1080, fps: 30, scenes: [], audio: null,
-    clips: [], captions: { burnIn: false, position: 'bottom', size: 44 }, brandKitId: null, visualChecks: true, codebases: [], app: null, narrator: { ...DEFAULT_NARRATOR },
+    id, name, artDirection: '', width: size?.width ?? d.width, height: size?.height ?? d.height, fps: d.fps, scenes: [], audio: null,
+    clips: [], captions: { burnIn: false, position: 'bottom', size: 44 }, brandKitId: null, visualChecks: d.visualChecks, codebases: [], app: null, appCodebases: [], narrator: { ...DEFAULT_NARRATOR, voice: d.voice },
     folder: normalizeFolder(folder), createdAt: new Date().toISOString()
   }
   for (const s of scenes ?? [{ title: 'Intro', html: blankScene(name) }]) {

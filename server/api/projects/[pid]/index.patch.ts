@@ -1,5 +1,5 @@
-import { promises as fs } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { cleanRepos, createApp, getApp, updateApp } from '../../../utils/apps'
+import { readSettings } from '../../../utils/settings'
 import { APP_MODES, type AppMode, type AudioInfo, type CaptionSettings, type Clip, type Codebase } from '../../../utils/store'
 
 const nums = (l: unknown) => Array.isArray(l) ? l.map(Number).filter(Number.isFinite) : undefined
@@ -20,24 +20,36 @@ export default defineEventHandler(async (event) => {
     brandKitId?: string | null
     visualChecks?: boolean
     codebases?: Partial<Codebase>[]
+    // The shared app this project is about (apps.ts), and how it shows it. `app` with an address links the app
+    // with that address, creating it if needed (older editors, imports).
+    appId?: string | null
+    appMode?: AppMode
     app?: { url?: string, notes?: string, mode?: AppMode } | null
     narrator?: { voice?: string, speed?: number, shortlist?: string[], pronunciations?: { term?: string, sayAs?: string }[] }
     folder?: string
   }>(event)
 
+  // Linking an app keeps this project's display mode, or starts from the default in Bower settings.
+  const link = async (id: string) => {
+    const shared = await getApp(id)
+    if (!shared) throw createError({ statusCode: 404, message: 'App not found' })
+    p.app = { id: shared.id, name: shared.name, url: shared.url, notes: shared.notes, mode: p.app?.mode ?? (await readSettings()).defaults.appMode }
+    p.appCodebases = shared.codebases
+  }
+  if (body.appId !== undefined) {
+    if (body.appId) await link(String(body.appId))
+    else { p.app = null; p.appCodebases = [] }
+  }
   if (body.app !== undefined) {
     const url = String(body.app?.url ?? '').trim()
-    if (!url) {
-      p.app = null
-    } else {
-      let parsed: URL
-      try { parsed = new URL(url) } catch { throw createError({ statusCode: 422, message: 'The app address must be a full URL, like http://localhost:8000' }) }
-      if (!/^https?:$/.test(parsed.protocol)) throw createError({ statusCode: 422, message: 'The app address must start with http:// or https://' })
-      // A newly linked app defaults to real screenshots; one linked before the setting existed stays on "auto".
-      const mode = APP_MODES.includes(body.app?.mode as AppMode) ? body.app!.mode! : p.app?.mode ?? (p.app ? 'auto' : 'shots')
-      p.app = { url: parsed.toString().replace(/\/$/, ''), notes: String(body.app?.notes ?? p.app?.notes ?? '').slice(0, 2000), mode }
+    if (!url) { p.app = null; p.appCodebases = [] } else {
+      const shared = await createApp({ url, notes: body.app?.notes })
+      if (body.app?.notes !== undefined && shared.notes !== body.app.notes) await updateApp(shared.id, { notes: body.app.notes })
+      await link(shared.id)
     }
   }
+  const mode = body.appMode ?? body.app?.mode
+  if (p.app && mode && APP_MODES.includes(mode)) p.app.mode = mode
 
   if (typeof body.folder === 'string') p.folder = normalizeFolder(body.folder)
 
@@ -58,20 +70,7 @@ export default defineEventHandler(async (event) => {
   if (body.fps) p.fps = clamp(body.fps, 12, 60, 30)
   if (typeof body.visualChecks === 'boolean') p.visualChecks = body.visualChecks
   // The whole list is replaced; every path must be a folder on this machine.
-  if (Array.isArray(body.codebases)) {
-    const next: Codebase[] = []
-    for (const c of body.codebases.slice(0, 8)) {
-      const path = String(c?.path ?? '').trim()
-      if (!path) continue
-      const abs = resolve(path)
-      const st = await fs.stat(abs).catch(() => null)
-      if (!st?.isDirectory()) throw createError({ statusCode: 422, message: `"${path}" is not a folder on this machine` })
-      if (next.some(x => x.path.toLowerCase() === abs.toLowerCase())) continue
-      const label = String(c?.label ?? '').trim().slice(0, 40) || basename(abs)
-      next.push({ label, path: abs, notes: String(c?.notes ?? '').slice(0, 2000) })
-    }
-    p.codebases = next
-  }
+  if (Array.isArray(body.codebases)) p.codebases = await cleanRepos(body.codebases) as Codebase[]
   const brandChanged = body.brandKitId !== undefined && (body.brandKitId || null) !== p.brandKitId
   if (brandChanged) {
     if (body.brandKitId) await loadKit(assertId(body.brandKitId))

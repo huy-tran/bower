@@ -32,14 +32,14 @@ let clock: ReturnType<typeof setInterval>
 
 const tabs = [{ label: 'Scene', value: 'scene' }, { label: 'Project', value: 'project' }]
 const MODELS = [
-  { label: 'Default model', value: 'default', description: 'Whatever Claude Code uses' },
+  { label: 'Default model', value: 'default', description: 'The one set in Bower settings' },
   { label: 'Opus', value: 'opus', description: 'Best for building scenes' },
   { label: 'Sonnet', value: 'sonnet', description: 'Fast, good for tweaks' },
   { label: 'Haiku', value: 'haiku', description: 'Fastest, simple edits' }
 ]
+// "Default" sends no model, so the server uses the one in Bower settings (or Claude Code's own). A pick here
+// applies to this editor session only.
 const model = ref('default')
-try { model.value = localStorage.getItem('bower:model') || 'default' } catch {}
-watch(model, (m) => { try { localStorage.setItem('bower:model', m) } catch {} })
 
 // How Claude shows the app in this scene (saved in the scene's meta block); empty means the project setting.
 const APP_MODES = [

@@ -1,9 +1,11 @@
 import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
-import { loadProject, saveProject } from './store'
+import { updateApp } from './apps'
+import { allCodebases, loadProject, saveProject } from './store'
 
 // "Where to look" notes written by Claude itself: it reads a linked repository (read-only) and returns a short
-// orientation note, which is saved on the project's codebase entry. One scan per repo at a time.
+// orientation note, which is saved where the repo is linked: on the shared app or on the project. One scan per
+// repo at a time.
 export interface ScanJob { status: 'running' | 'done' | 'error', startedAt: number, activity: string[], error?: string }
 
 const jobs = new Map<string, ScanJob>()
@@ -34,7 +36,7 @@ export async function startScan(pid: string, path: string) {
   const k = key(pid, path)
   if (jobs.get(k)?.status === 'running') return getScan(pid, path)!
   const p = await loadProject(pid)
-  const repo = p.codebases.find(c => c.path.toLowerCase() === path.toLowerCase())
+  const repo = allCodebases(p).find(c => c.path.toLowerCase() === path.toLowerCase())
   if (!repo) throw createError({ statusCode: 404, message: 'That repository is not linked to this project' })
   const bin = await requireClaude()
 
@@ -79,8 +81,10 @@ export async function startScan(pid: string, path: string) {
     if (!isError && notes) {
       try {
         const fresh = await loadProject(pid)
-        const target = fresh.codebases.find(c => c.path.toLowerCase() === path.toLowerCase())
-        if (target) { target.notes = notes; await saveProject(fresh) }
+        const same = (c: { path: string }) => c.path.toLowerCase() === path.toLowerCase()
+        const own = fresh.codebases.find(same)
+        if (own) { own.notes = notes; await saveProject(fresh) }
+        else if (fresh.app && fresh.appCodebases.some(same)) await updateApp(fresh.app.id, { codebases: fresh.appCodebases.map(c => same(c) ? { ...c, notes } : c) })
         job.status = 'done'
       } catch (e) {
         job.status = 'error'

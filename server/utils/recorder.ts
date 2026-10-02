@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { claimVisible, closeLogin, launchVisible, profileDir, resolveTarget, showVisible, visibleKind } from './shots'
+import { claimVisible, closeLogin, launchVisible, profileDir, projectApp, resolveTarget, showVisible, visibleKind } from './shots'
 import type { Step } from './steps'
 import { loadProject } from './store'
 
@@ -120,19 +120,18 @@ export function getRecording(pid: string) {
 }
 
 export async function startRecording(pid: string, target?: string) {
-  const p = await loadProject(pid)
-  if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address first' })
-  if (visibleKind(pid)) throw createError({ statusCode: 409, message: visibleKind(pid) === 'record' ? 'A recording is already open' : 'Close the sign-in window first' })
-  await fs.mkdir(profileDir(pid), { recursive: true })
-  const startUrl = resolveTarget(p.app.url, target || '/')
+  const { app } = await projectApp(pid)
+  if (visibleKind(app.id)) throw createError({ statusCode: 409, message: visibleKind(app.id) === 'record' ? 'A recording is already open' : 'Close the sign-in window first' })
+  await fs.mkdir(profileDir(app.id), { recursive: true })
+  const startUrl = resolveTarget(app.url, target || '/')
   const rec: Recording = { steps: [], start: startUrl, open: true, skippedPassword: false, lastAt: 0 }
   recordings.set(pid, rec)
 
-  const browser = await launchVisible(pid, 1360)
-  claimVisible(pid, browser, 'record')
+  const browser = await launchVisible(app.id, 1360)
+  claimVisible(app.id, browser, 'record')
   browser.on('disconnected', () => { rec.open = false })
   const page = (await browser.pages())[0] ?? await browser.newPage()
-  const origin = new URL(p.app.url).origin
+  const origin = new URL(app.url).origin
   let shots = 0, firstNav = true
 
   const push = (s: Step) => {
@@ -166,6 +165,7 @@ export async function startRecording(pid: string, target?: string) {
 }
 
 export async function stopRecording(pid: string) {
-  if (visibleKind(pid) === 'record') await closeLogin(pid)
+  const p = await loadProject(pid)
+  if (p.app && visibleKind(p.app.id) === 'record') await closeLogin(pid)
   return getRecording(pid)
 }

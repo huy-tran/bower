@@ -1,5 +1,6 @@
-// Project setup progress, shared by the checklist in Settings, General and the "Setup 3/6" chip in the header,
-// so both always agree. Claude Code is checked once per editor; the sign-in state per project.
+// Project setup progress, shared by the checklist in Settings, General and the "Setup 3/5" chip in the header,
+// so both always agree. Claude Code is not a project item (it is set up in Bower settings) but it is checked
+// here too: when it is not ready, the chip warns about it instead.
 import type { SettingsTab } from '~/components/ProjectSettingsModal.vue'
 
 export interface ClaudeHealth { installed: boolean, loggedIn: boolean, version?: string, path?: string, source?: string, setting: string }
@@ -32,14 +33,8 @@ export function useSetup() {
 
   const items = computed<SetupItem[]>(() => {
     const p = project.value
-    const c = health.value
     const s = sessionFor.value === p?.id ? session.value : null
-    const list: SetupItem[] = [{
-      key: 'claude',
-      label: 'Claude Code is installed and signed in',
-      detail: !c ? 'Checking…' : !c.installed ? 'Bower uses Claude Code to build scenes. Install it, or point Bower at it if it is installed somewhere unusual.' : !c.loggedIn ? 'Open Claude Code once and sign in with your Claude account, then check again.' : `Ready${c.version ? ` (${c.version})` : ''}.`,
-      done: !!c?.installed && !!c?.loggedIn
-    }, { key: 'app', label: 'Your app’s address is set', detail: p?.app ? p.app.url : 'So Claude can show real screens of your product. Skip it if the video is not about an app.', done: !!p?.app, optional: true, tab: 'app', action: 'Set address' }]
+    const list: SetupItem[] = [{ key: 'app', label: 'The app is chosen', detail: p?.app ? `${p.app.name} (${p.app.url})` : 'So Claude can show real screens of your product. Skip it if the video is not about an app.', done: !!p?.app, optional: true, tab: 'app', action: 'Choose app' }]
     if (p?.app) {
       list.push(
         { key: 'reach', label: 'Bower can reach the app', detail: s?.reachable === false ? 'The last test could not reach it. Is the site running?' : s?.reachable ? 'The last test reached it.' : 'Not tested yet.', done: !!s?.reachable, optional: true, tab: 'app', action: 'Test connection' },
@@ -47,7 +42,7 @@ export function useSetup() {
       )
     }
     list.push(
-      { key: 'code', label: 'The app’s code is linked', detail: p?.codebases.length ? p.codebases.map(x => x.label).join(', ') : 'Helps Claude match real colours, copy and components. A developer can set this up for you.', done: !!p?.codebases.length, optional: true, tab: 'codebase', action: 'Link code' },
+      { key: 'code', label: 'The app’s code is linked', detail: [...(p?.appCodebases ?? []), ...(p?.codebases ?? [])].map(x => x.label).join(', ') || 'Helps Claude match real colours, copy and components. A developer can set this up for you.', done: !!(p?.appCodebases?.length || p?.codebases.length), optional: true, tab: 'codebase', action: 'Link code' },
       { key: 'brand', label: 'A brand kit is chosen', detail: p?.brandKitId ? 'Claude follows its colours, fonts and logos.' : 'Colours, fonts and logos to stay on brand.', done: !!p?.brandKitId, optional: true, tab: 'brand', action: 'Choose kit' }
     )
     return list

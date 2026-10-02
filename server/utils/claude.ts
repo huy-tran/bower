@@ -1,9 +1,10 @@
 import type { ChildProcess } from 'node:child_process'
 import { requireClaude, spawnClaude } from './claudeBin'
+import { readSettings } from './settings'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { addVersion, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneFile, sceneViews, writeScene, type AppMode, type Project, type SceneView } from './store'
+import { addVersion, allCodebases, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneFile, sceneViews, writeScene, type AppMode, type Project, type SceneView } from './store'
 
 export interface ChatJob {
   status: 'running' | 'done' | 'error'
@@ -60,8 +61,8 @@ const appLine = (p: Project, s?: SceneView) => p.app
   ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md) and Read them. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms. ${APP_MODE_LINES[s?.app ?? p.app.mode ?? 'auto']}${s?.app ? ' (This scene sets this in the "app" key of its meta block; keep the key.)' : ''} An explicit instruction in the request overrides this.`
   : ''
 
-const codebaseLine = (p: Project) => p.codebases.length
-  ? `The product's source code is linked, read-only (see "Linked codebases" in CLAUDE.md): ${p.codebases.map(c => `${c.label} at \`${c.path}\``).join('; ')}. When the request refers to the app, its screens, components, copy, data or styling, look there first and reproduce what you find.`
+const codebaseLine = (p: Project) => allCodebases(p).length
+  ? `The product's source code is linked, read-only (see "Linked codebases" in CLAUDE.md): ${allCodebases(p).map(c => `${c.label} at \`${c.path}\``).join('; ')}. When the request refers to the app, its screens, components, copy, data or styling, look there first and reproduce what you find.`
   : ''
 
 async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
@@ -163,7 +164,7 @@ function describeTool(p: Project, c: any) {
   }
   const f = c.input?.file_path || c.input?.pattern || c.input?.path || ''
   let short = String(f).replace(projectDir(p.id), '')
-  for (const c of p.codebases) if (short.startsWith(c.path)) { short = c.label + short.slice(c.path.length); break }
+  for (const c of allCodebases(p)) if (short.startsWith(c.path)) { short = c.label + short.slice(c.path.length); break }
   short = short.replace(/^[\\/]/, '').replace(/\\/g, '/')
   if (c.name === 'Read' && /\.(png|jpe?g|webp|gif)$/i.test(short)) return `Viewing ${short}`
   const verb = ({ Read: 'Reading', Edit: 'Editing', MultiEdit: 'Editing', Write: 'Writing', Glob: 'Searching', Grep: 'Searching' } as Record<string, string>)[c.name] || c.name
@@ -178,7 +179,8 @@ export async function startChat(pid: string, key: string, message: string, opts:
   const project = await loadProject(pid)
   await saveProject(project) // refresh CLAUDE.md and bower.mjs with the latest settings
   const attachments = (opts.attachments ?? []).filter(a => /^assets\/(shots\/)?[\w.-]+$/.test(a)).slice(0, 8)
-  const model = opts.model && MODELS.includes(opts.model) ? opts.model : process.env.BOWER_MODEL
+  // The model picked for this message, else the default in Bower settings, else Claude Code's own.
+  const model = opts.model && MODELS.includes(opts.model) ? opts.model : (await readSettings()).model ?? process.env.BOWER_MODEL
   const context = key === 'project' ? await projectContext(project) : await sceneContext(project, key, opts)
   const prompt = [
     context,
@@ -208,7 +210,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
   if (model) args.push('--model', model)
   if (chat.sessionId) args.push('--resume', chat.sessionId)
   // Read/Glob/Grep are refused outside the working directory in -p mode; --add-dir is the supported way to widen it.
-  for (const c of project.codebases) args.push('--add-dir', c.path)
+  for (const c of allCodebases(project)) args.push('--add-dir', c.path)
 
   const proc = spawnClaude(bin, args, {
     cwd: projectDir(pid),

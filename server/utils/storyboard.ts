@@ -1,6 +1,6 @@
 import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
-import { addVersion, blankScene, loadProject, newSceneId, projectDir, projectView, saveProject, sceneViews, writeScene } from './store'
+import { addVersion, allCodebases, blankScene, loadProject, newSceneId, projectDir, projectView, saveProject, sceneViews, writeScene } from './store'
 import { trashScene } from './trash'
 
 // Storyboard: Claude drafts a scene list from a brief (read-only, so it can consult CLAUDE.md, the brand kit and
@@ -65,7 +65,7 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
     '--allowedTools', 'Read,Glob,Grep',
     '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent'
   ]
-  for (const c of p.codebases) args.push('--add-dir', c.path)
+  for (const c of allCodebases(p)) args.push('--add-dir', c.path)
   if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
   const proc = spawnClaude(bin, args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   proc.stdin.end(prompt)

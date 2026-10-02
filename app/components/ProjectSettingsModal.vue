@@ -28,7 +28,8 @@ const draft = reactive({
   visualChecks: true,
   artDirection: '',
   repos: [] as { label: string, path: string, notes: string }[],
-  app: { url: '', notes: '', mode: 'shots' as 'shots' | 'rebuild' | 'auto' },
+  appRepos: [] as { label: string, path: string, notes: string }[],
+  app: { name: '', url: '', notes: '', mode: 'shots' as 'shots' | 'rebuild' | 'auto' },
   narrator: { voice: 'af_heart', speed: 1 },
   pronunciations: [] as { term: string, sayAs: string }[],
   captions: { burnIn: false, position: 'bottom' as 'bottom' | 'top', size: 44 }
@@ -44,7 +45,8 @@ watch([open, project], ([o]) => {
   draft.visualChecks = p.visualChecks
   draft.artDirection = p.artDirection
   draft.repos = p.codebases.map(c => ({ ...c }))
-  draft.app = { url: p.app?.url ?? '', notes: p.app?.notes ?? '', mode: p.app?.mode ?? (p.app ? 'auto' : 'shots') }
+  draft.appRepos = (p.appCodebases ?? []).map(c => ({ ...c }))
+  draft.app = { name: p.app?.name ?? '', url: p.app?.url ?? '', notes: p.app?.notes ?? '', mode: p.app?.mode ?? 'shots' }
   draft.narrator = { voice: p.narrator.voice, speed: p.narrator.speed }
   draft.pronunciations = p.narrator.pronunciations.map(x => ({ ...x }))
   draft.captions = { ...p.captions }
@@ -76,10 +78,65 @@ const savePronunciations = () => save({ narrator: { pronunciations: draft.pronun
 function addPronunciation() { draft.pronunciations.push({ term: '', sayAs: '' }) }
 function removePronunciation(i: number) { draft.pronunciations.splice(i, 1); savePronunciations() }
 const saveCaptions = () => save({ captions: { ...draft.captions } })
-// The running product: address and notes autosave; a visible window handles sign-in; captures go to assets/shots.
+// The running product is a shared app (Bower settings, Apps): the project picks one, and its address, notes,
+// repositories and sign-in are shared with every project about it. Only the display mode is the project's own.
 const chat = useChat()
 const appLinked = computed(() => !!project.value?.app)
-const saveApp = () => save({ app: draft.app.url.trim() ? { url: draft.app.url.trim(), notes: draft.app.notes, mode: draft.app.mode } : null }, 600)
+interface AppListItem { id: string, name: string, url: string, projects: { id: string, name: string }[] }
+const apps = ref<AppListItem[]>([])
+const loadApps = async () => { apps.value = await $fetch<AppListItem[]>('/api/apps').catch(() => []) }
+watch(open, (o) => { if (o) loadApps() }, { immediate: true })
+const appItems = computed(() => [
+  ...apps.value.map(a => ({ label: a.name, description: a.url, value: a.id })),
+  { label: 'Add a new app…', value: 'new', icon: 'i-heroicons-plus' },
+  { label: 'No app', value: 'none', icon: 'i-heroicons-no-symbol' }
+])
+const newApp = reactive({ open: false, url: '', busy: false })
+const appChoice = computed({
+  get: () => newApp.open ? 'new' : project.value?.app?.id ?? 'none',
+  set: async (v: string) => {
+    if (v === 'new') { newApp.open = true; newApp.url = ''; return }
+    newApp.open = false
+    lastCheck.value = null
+    await linkApp(v === 'none' ? null : v)
+  }
+})
+async function linkApp(id: string | null) {
+  setProject(await $fetch(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { appId: id } }))
+  const a = project.value?.app
+  draft.app = { name: a?.name ?? '', url: a?.url ?? '', notes: a?.notes ?? '', mode: a?.mode ?? 'shots' }
+  await Promise.all([loadApps(), loadShots()])
+}
+async function addApp() {
+  newApp.busy = true
+  try {
+    const a = await $fetch<{ id: string }>('/api/apps', { method: 'POST', body: { url: newApp.url } })
+    newApp.open = false
+    await linkApp(a.id)
+  } catch (err: any) {
+    toast.add({ title: 'Could not add the app', description: err?.data?.message || err?.message, color: 'error' })
+  } finally {
+    newApp.busy = false
+  }
+}
+// Other projects that will see edits to the shared app.
+const sharedWith = computed(() => apps.value.find(a => a.id === project.value?.app?.id)?.projects.filter(x => x.id !== project.value?.id) ?? [])
+let appTimer: ReturnType<typeof setTimeout>
+function saveApp() {
+  const id = project.value?.app?.id
+  if (!id) return
+  clearTimeout(appTimer)
+  appTimer = setTimeout(async () => {
+    try {
+      await $fetch(`/api/apps/${id}`, { method: 'PATCH', body: { name: draft.app.name, url: draft.app.url, notes: draft.app.notes } })
+      setProject(await $fetch(`/api/projects/${project.value!.id}`))
+      loadApps()
+    } catch (e: any) {
+      toast.add({ title: 'Could not save the app', description: e?.data?.message || e?.message, color: 'error' })
+    }
+  }, 600)
+}
+const saveMode = () => save({ appMode: draft.app.mode }, 0)
 const appModeItems = [
   { label: 'Real screenshots', description: 'Claude captures the states it needs and animates them with crops, zooms and crossfades. Pixel-exact.', value: 'shots' },
   { label: 'Rebuild in HTML', description: 'Claude redraws screens from screenshots and the code, so parts can animate separately.', value: 'rebuild' },
@@ -256,26 +313,47 @@ function useInChat(s: { path: string, url: string, name: string }) {
 }
 
 // Linked repositories. Labels and notes autosave; adding one is explicit because the server validates the path.
-const newRepo = reactive({ label: '', path: '', notes: '' })
+// A repo belongs to the shared app (every project about it reads it) or to this project only.
+const newRepo = reactive({ label: '', path: '', notes: '', scope: 'app' as 'app' | 'project' })
+watch(() => project.value?.app?.id, (id) => { newRepo.scope = id ? 'app' : 'project' }, { immediate: true })
 // The link form stays tucked behind "Add repository" once a repo is linked; with none it is the whole tab.
 const linkFormOpen = ref(false)
-const showLinkForm = computed(() => !draft.repos.length || linkFormOpen.value)
+const showLinkForm = computed(() => (!draft.repos.length && !draft.appRepos.length) || linkFormOpen.value)
 function cancelLink() {
   Object.assign(newRepo, { label: '', path: '', notes: '' })
   linkFormOpen.value = false
 }
 const saveRepos = () => save({ codebases: draft.repos }, 600)
+const repoGroups = computed(() => [
+  { scope: 'app' as const, title: `From the app “${project.value?.app?.name ?? ''}”`, help: 'Shared by every project about this app. Edit them here or in any of those projects.', list: draft.appRepos, save: () => saveAppRepos() },
+  { scope: 'project' as const, title: draft.appRepos.length ? 'This project only' : 'Linked repositories', help: draft.appRepos.length ? 'Extra code only this video needs.' : 'Code Claude may read for this project.', list: draft.repos, save: saveRepos }
+].filter(g => g.list.length))
+let appRepoTimer: ReturnType<typeof setTimeout>
+async function patchAppRepos(list: { label: string, path: string, notes: string }[]) {
+  await $fetch(`/api/apps/${project.value!.app!.id}`, { method: 'PATCH', body: { codebases: list } })
+  const view = await $fetch<any>(`/api/projects/${project.value!.id}`)
+  setProject(view)
+  return view
+}
+function saveAppRepos() {
+  clearTimeout(appRepoTimer)
+  appRepoTimer = setTimeout(() => patchAppRepos(draft.appRepos).catch((e: any) => toast.add({ title: 'Could not save', description: e?.data?.message || e?.message, color: 'error' })), 600)
+}
 async function addRepo() {
   const path = newRepo.path.trim()
   if (!path) return
   const notes = newRepo.notes
   try {
-    const view = await $fetch<any>(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { codebases: [...draft.repos, { label: newRepo.label.trim(), path, notes }] } })
-    setProject(view)
+    const entry = { label: newRepo.label.trim(), path, notes }
+    const toApp = newRepo.scope === 'app' && !!project.value?.app
+    const view = toApp
+      ? await patchAppRepos([...draft.appRepos, entry])
+      : await $fetch<any>(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { codebases: [...draft.repos, entry] } })
+    if (!toApp) setProject(view)
     Object.assign(newRepo, { label: '', path: '', notes: '' })
     linkFormOpen.value = false
     // No note written by hand: let Claude read the repo and write one.
-    const added = view.codebases.find((c: any) => c.path.toLowerCase() === path.toLowerCase() || c.path.toLowerCase().endsWith(path.replace(/[\\/]+$/, '').toLowerCase()))
+    const added = [...view.appCodebases, ...view.codebases].find((c: any) => c.path.toLowerCase() === path.toLowerCase() || c.path.toLowerCase().endsWith(path.replace(/[\\/]+$/, '').toLowerCase()))
     if (added && !notes.trim()) {
       toast.add({ title: 'Repository linked', description: 'Claude is reading it to write the "where to look" note.', color: 'success' })
       scanRepo(added.path)
@@ -311,9 +389,10 @@ async function scanRepo(path: string) {
     delete scans[path]
   }
 }
-async function removeRepo(path: string) {
+async function removeRepo(path: string, scope: 'app' | 'project' = 'project') {
   try {
-    setProject(await $fetch(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { codebases: draft.repos.filter(r => r.path !== path) } }))
+    if (scope === 'app') await patchAppRepos(draft.appRepos.filter(r => r.path !== path))
+    else setProject(await $fetch(`/api/projects/${project.value!.id}`, { method: 'PATCH', body: { codebases: draft.repos.filter(r => r.path !== path) } }))
     toast.add({ title: 'Repository unlinked', color: 'neutral' })
   } catch (err: any) {
     toast.add({ title: 'Could not unlink', description: err?.data?.message || err?.message, color: 'error' })
@@ -422,25 +501,34 @@ function download(format: 'srt' | 'vtt') {
 
           <!-- Codebase -->
           <div v-else-if="tab === 'codebase'" class="space-y-5">
-            <UCard v-for="(r, i) in draft.repos" :key="r.path" :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
-              <div class="flex items-center gap-2">
-                <UIcon name="i-heroicons-code-bracket" class="size-4 shrink-0 text-muted" />
-                <UInput v-model="r.label" variant="ghost" size="sm" placeholder="Label, e.g. API" class="w-40 font-semibold" @update:model-value="saveRepos" />
-                <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted" :title="r.path">{{ r.path }}</span>
-                <UTooltip :text="r.notes.trim() ? 'Have Claude read the repo again and rewrite the note' : 'Have Claude read the repo and write the note'">
-                  <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-sparkles" :label="r.notes.trim() ? 'Rescan' : 'Scan with Claude'" :loading="!!scans[r.path]" :aria-label="`Scan ${r.label}`" @click="scanRepo(r.path)" />
-                </UTooltip>
-                <UTooltip text="Unlink this repository">
-                  <UButton size="xs" color="neutral" variant="ghost" icon="i-heroicons-link-slash" :aria-label="`Unlink ${r.label}`" @click="removeRepo(r.path)" />
-                </UTooltip>
+            <template v-for="g in repoGroups" :key="g.scope">
+              <div class="space-y-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-highlighted">{{ g.title }}</h3>
+                  <p class="text-xs text-muted">{{ g.help }}</p>
+                </div>
+                <UCard v-for="(r, i) in g.list" :key="r.path" :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
+                  <div class="flex items-center gap-2">
+                    <UIcon name="i-heroicons-code-bracket" class="size-4 shrink-0 text-muted" />
+                    <UInput v-model="r.label" variant="ghost" size="sm" placeholder="Label, e.g. API" class="w-40 font-semibold" @update:model-value="g.save" />
+                    <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted" :title="r.path">{{ r.path }}</span>
+                    <UTooltip :text="r.notes.trim() ? 'Have Claude read the repo again and rewrite the note' : 'Have Claude read the repo and write the note'">
+                      <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-sparkles" :label="r.notes.trim() ? 'Rescan' : 'Scan with Claude'" :loading="!!scans[r.path]" :aria-label="`Scan ${r.label}`" @click="scanRepo(r.path)" />
+                    </UTooltip>
+                    <UTooltip text="Unlink this repository">
+                      <UButton size="xs" color="neutral" variant="ghost" icon="i-heroicons-link-slash" :aria-label="`Unlink ${r.label}`" @click="removeRepo(r.path, g.scope)" />
+                    </UTooltip>
+                  </div>
+                  <p v-if="scans[r.path]" class="flex items-center gap-1.5 text-xs text-muted"><UIcon name="i-heroicons-arrow-path" class="size-3.5 animate-spin" /> {{ scans[r.path]!.activity.at(-1) }}</p>
+                  <UTextarea v-model="g.list[i]!.notes" :rows="3" autoresize class="w-full" :placeholder="scans[r.path] ? 'Claude is writing this…' : 'Where to look, e.g. Laravel API: routes in routes/api.php, models in app/Models, resources in app/Http/Resources. Or click Scan with Claude.'" @update:model-value="g.save" />
+                </UCard>
               </div>
-              <p v-if="scans[r.path]" class="flex items-center gap-1.5 text-xs text-muted"><UIcon name="i-heroicons-arrow-path" class="size-3.5 animate-spin" /> {{ scans[r.path]!.activity.at(-1) }}</p>
-              <UTextarea v-model="draft.repos[i]!.notes" :rows="3" autoresize class="w-full" :placeholder="scans[r.path] ? 'Claude is writing this…' : 'Where to look, e.g. Laravel API: routes in routes/api.php, models in app/Models, resources in app/Http/Resources. Or click Scan with Claude.'" @update:model-value="saveRepos" />
-            </UCard>
+            </template>
 
             <UButton v-if="!showLinkForm" color="neutral" variant="outline" icon="i-heroicons-plus" label="Add repository" @click="linkFormOpen = true" />
             <UCard v-else :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
-              <h3 class="font-semibold text-highlighted">{{ draft.repos.length ? 'Link another repository' : 'Link a repository' }}</h3>
+              <h3 class="font-semibold text-highlighted">{{ draft.repos.length || draft.appRepos.length ? 'Link another repository' : 'Link a repository' }}</h3>
+              <URadioGroup v-if="appLinked" v-model="newRepo.scope" orientation="horizontal" size="sm" :items="[{ label: `For the app (${project?.app?.name}), shared by its projects`, value: 'app' }, { label: 'This project only', value: 'project' }]" />
               <div class="grid grid-cols-[10rem_1fr] gap-2">
                 <UFormField label="Label" size="sm">
                   <UInput v-model="newRepo.label" placeholder="e.g. API, Frontend" size="sm" class="w-full" />
@@ -466,12 +554,32 @@ function download(format: 'srt' | 'vtt') {
 
           <!-- App -->
           <div v-else-if="tab === 'app'" class="space-y-5">
-            <UFormField label="App address" hint="Base URL" help="Where the product runs for you, for example a local dev server or a staging site.">
-              <div class="flex gap-2">
-                <UInput v-model="draft.app.url" placeholder="e.g. http://localhost:8000 or https://staging.acme.com" class="flex-1 font-mono text-sm" @update:model-value="saveApp" />
-                <UButton color="neutral" variant="outline" icon="i-heroicons-signal" label="Test connection" :loading="checking" :disabled="!appLinked" @click="testConnection" />
-              </div>
+            <UFormField label="The app this video is about" help="Apps are shared: their address, notes, code and sign-in are set up once and used by every project about them. Manage them in Bower settings.">
+              <USelect v-model="appChoice" :items="appItems" class="w-full" placeholder="Choose an app" :ui="{ content: 'min-w-80' }" />
             </UFormField>
+            <UCard v-if="newApp.open" :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
+              <UFormField label="App address" help="Where the product runs for you, for example a local dev server or a staging site. If another project already uses this address, its app (and sign-in) is reused.">
+                <div class="flex gap-2">
+                  <UInput v-model="newApp.url" autofocus placeholder="e.g. http://localhost:8000 or https://staging.acme.com" class="flex-1 font-mono text-sm" @keydown.enter="addApp" />
+                  <UButton icon="i-heroicons-plus" label="Add app" :loading="newApp.busy" :disabled="!newApp.url.trim()" @click="addApp" />
+                </div>
+              </UFormField>
+            </UCard>
+            <UEmpty v-else-if="!appLinked" variant="soft" icon="i-heroicons-window" title="No app chosen" description="Choose the product this video is about so Claude can show its real screens. Skip it if the video is not about an app." />
+
+            <template v-if="appLinked && !newApp.open">
+            <p v-if="sharedWith.length" class="flex items-start gap-2 text-xs text-muted"><UIcon name="i-heroicons-link" class="mt-0.5 size-3.5 shrink-0" /> Shared with {{ sharedWith.map(x => `“${x.name}”`).join(', ') }}. Changes to the name, address, notes and sign-in apply there too.</p>
+            <div class="grid grid-cols-[12rem_1fr] gap-3">
+              <UFormField label="Name">
+                <UInput v-model="draft.app.name" class="w-full" @update:model-value="saveApp" />
+              </UFormField>
+              <UFormField label="App address" hint="Base URL">
+                <div class="flex gap-2">
+                  <UInput v-model="draft.app.url" placeholder="e.g. http://localhost:8000" class="flex-1 font-mono text-sm" @update:model-value="saveApp" />
+                  <UButton color="neutral" variant="outline" icon="i-heroicons-signal" label="Test connection" :loading="checking" @click="testConnection" />
+                </div>
+              </UFormField>
+            </div>
             <UAlert v-if="lastCheck" :color="!lastCheck.reachable || lastCheck.error ? 'error' : lastCheck.signedIn === false ? 'warning' : 'success'" variant="soft" :icon="!lastCheck.reachable || lastCheck.error ? 'i-heroicons-x-circle' : lastCheck.signedIn === false ? 'i-heroicons-exclamation-triangle' : 'i-heroicons-check-circle'"
               :title="lastCheck.loginOpen ? 'The sign-in window is open' : !lastCheck.reachable ? 'Bower cannot reach the app' : lastCheck.error ? 'The app answered with a problem' : lastCheck.signedIn === false ? 'The app is up, but Bower is signed out' : lastCheck.autoSignedIn ? 'Connected, and signed in with the saved login' : lastCheck.signedIn ? 'Connected and signed in' : 'Connected'"
               :description="lastCheck.loginOpen ? 'Close it, then test again.' : lastCheck.error || (lastCheck.signedIn === false ? 'Sign in below with Open browser, or save a login so Bower can sign in by itself.' : lastCheck.signedIn === null ? `The app answered${lastCheck.title ? ` (“${lastCheck.title}”)` : ''}. Sign in once below so Bower can tell when it gets signed out.` : lastCheck.title ? `Opened “${lastCheck.title}”.` : undefined)" />
@@ -482,8 +590,8 @@ function download(format: 'srt' | 'vtt') {
                 <span v-if="notesJob" class="truncate text-xs text-muted">{{ notesJob.activity.at(-1) }}</span>
               </div>
             </UFormField>
-            <UFormField label="How Claude shows the app" help="A scene can override this from the picker in its chat. Saying it in a request always wins.">
-              <URadioGroup v-model="draft.app.mode" :items="appModeItems" :disabled="!draft.app.url.trim()" @update:model-value="saveApp" />
+            <UFormField label="How Claude shows the app in this project" help="Just for this project. A scene can override it from the picker in its chat, and saying it in a request always wins.">
+              <URadioGroup v-model="draft.app.mode" :items="appModeItems" @update:model-value="saveMode" />
             </UFormField>
 
             <UCard :ui="{ body: 'p-4 sm:p-4 space-y-4' }">
@@ -504,7 +612,7 @@ function download(format: 'srt' | 'vtt') {
 
               <div v-if="session?.savedSupported" class="space-y-2 border-t border-default pt-4">
                 <h4 class="text-sm font-medium text-highlighted">Saved login <span class="font-normal text-muted">(optional)</span></h4>
-                <p class="text-xs text-muted">Bower signs in by itself when the session runs out. The password is encrypted for your Windows account, stays on this computer and is never shown to Claude or included when you export the project. A demo or test account is best.</p>
+                <p class="text-xs text-muted">Bower signs in by itself when the session runs out, for every project about this app. The password is encrypted for your Windows account, stays on this computer and is never shown to Claude or included when you export a project. A demo or test account is best.</p>
                 <div v-if="session.saved" class="flex items-center gap-2 text-sm">
                   <UIcon name="i-heroicons-key" class="size-4 text-muted" />
                   <span>Saved for <span class="font-medium">{{ session.saved.user }}</span></span>
@@ -517,11 +625,12 @@ function download(format: 'srt' | 'vtt') {
                 </div>
               </div>
             </UCard>
+            </template>
           </div>
 
           <!-- Screenshots -->
           <div v-else-if="tab === 'shots'" class="space-y-5">
-            <UAlert v-if="!appLinked" color="neutral" variant="soft" icon="i-heroicons-information-circle" title="Set the app address first" description="Screenshots are taken from the running product. Add its address in the App tab." :actions="[{ label: 'Go to App', color: 'neutral', variant: 'outline', onClick: () => { tab = 'app' } }]" />
+            <UAlert v-if="!appLinked" color="neutral" variant="soft" icon="i-heroicons-information-circle" title="Choose the app first" description="Screenshots are taken from the running product. Pick it (or add it) in the App tab." :actions="[{ label: 'Go to App', color: 'neutral', variant: 'outline', onClick: () => { tab = 'app' } }]" />
             <UAlert v-else-if="recording" color="info" variant="soft" icon="i-heroicons-video-camera" :title="`Recording · ${recording.steps.length} step${recording.steps.length === 1 ? '' : 's'}`" description="Click through the app in the window that opened. Use “Capture this screen” in its corner bar wherever you want a screenshot, then Finish." :actions="[{ label: 'Finish', color: 'info', variant: 'solid', onClick: finishRecording }]" />
             <UAlert v-else-if="loginOpen" color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" title="The sign-in window is open" description="Chrome cannot use the session twice at once. Close it to capture." :actions="[{ label: 'Close window', color: 'warning', variant: 'outline', onClick: closeLogin }]" />
             <UAlert v-else-if="session?.signedIn === false && !session.saved" color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" title="Bower is signed out of the app" description="Pages behind sign-in will fail until you sign in again." :actions="[{ label: 'Go to App', color: 'warning', variant: 'outline', onClick: () => { tab = 'app' } }]" />

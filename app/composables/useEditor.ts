@@ -63,8 +63,11 @@ export interface ProjectView {
   captions: { burnIn: boolean, position: 'bottom' | 'top', size: number }
   brandKitId: string | null
   visualChecks: boolean
+  // This project's own repositories; the shared app's come separately as appCodebases.
   codebases: { label: string, path: string, notes: string }[]
-  app: { url: string, notes: string, mode?: 'shots' | 'rebuild' | 'auto' } | null
+  // The shared app this project is about (Bower settings, Apps), with this project's way of showing it.
+  app: { id: string, name: string, url: string, notes: string, mode: 'shots' | 'rebuild' | 'auto' } | null
+  appCodebases: { label: string, path: string, notes: string }[]
   narrator: { voice: string, speed: number, shortlist: string[], pronunciations: { term: string, sayAs: string }[] }
   folder: string
   versions: Record<string, number>

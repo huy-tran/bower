@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { projectBrand, type BrandKit } from './brand'
 import { STORAGE } from './paths'
-import type { Project } from './store'
+import { allCodebases, type Project } from './store'
 
 const BT = '`'
 const code = (s: string) => BT + s + BT
@@ -86,7 +86,8 @@ function brandSection(p: Project, kit: BrandKit) {
 }
 
 function codebaseSection(p: Project) {
-  const many = p.codebases.length > 1
+  const repos = allCodebases(p)
+  const many = repos.length > 1
   const lines = [
     `## Linked codebase${many ? 's' : ''}`,
     '',
@@ -94,7 +95,7 @@ function codebaseSection(p: Project) {
     `${many ? 'them' : 'it'}, and never copy ${many ? 'their' : 'its'} files into this project.`,
     ''
   ]
-  for (const c of p.codebases) {
+  for (const c of repos) {
     lines.push(`### ${c.label}: ${code(c.path)}`, '')
     if (c.notes.trim()) lines.push(c.notes.trim(), '')
   }
@@ -300,7 +301,7 @@ Motion should feel like a polished product-launch video: confident easing (outEx
 inOutCubic for travel), restrained timing, crisp typography, generous whitespace, subtle depth. Nothing jitters,
 nothing pops without intent, and no element sits still in an awkward half-state.
 
-${kit ? brandSection(p, kit) : ''}${p.codebases.length ? codebaseSection(p) : ''}${p.app ? appSection(p) : ''}## Art direction
+${kit ? brandSection(p, kit) : ''}${allCodebases(p).length ? codebaseSection(p) : ''}${p.app ? appSection(p) : ''}## Art direction
 
 ${art || '_No project art direction set yet. Default to a clean, minimal, black-on-white product aesthetic with Inter._'}
 `

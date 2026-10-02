@@ -6,15 +6,17 @@ import { CHROME_ARGS } from './browser'
 import { getSavedLogin, isLoginUrl, landedOnSignIn, readSession, signInWithSavedLogin, updateSession } from './session'
 import { showBrowserWindow } from './showWindow'
 import { hasShotStep, installFinder, parseSteps, runSteps, StepError, type Step } from './steps'
+import { appDir } from './apps'
 import { loadProject, projectDir, slugify } from './store'
 
-// Screenshots of the running product. Each project keeps its own Chrome profile under .bower/browser, so the
-// user logs in once in a visible window and later headless captures reuse that session. Nothing is stored
-// about the login itself beyond what Chrome keeps in the profile (and an optional saved login, see session.ts).
-export const profileDir = (pid: string) => join(projectDir(pid), '.bower', 'browser')
+// Screenshots of the running product. Each shared app (apps.ts) keeps one Chrome profile, so the user signs in
+// once in a visible window and later headless captures for every project about that app reuse the session.
+// Nothing is stored about the login itself beyond what Chrome keeps in the profile (and an optional saved
+// login, see session.ts). Screenshots themselves belong to the project that took them.
+export const profileDir = (appId: string) => join(appDir(appId), 'browser')
 const shotsDir = (pid: string) => join(projectDir(pid), 'assets', 'shots')
 // Visible windows on the profile: the sign-in window or a step recording. Chrome cannot share a profile, so
-// while one is open, headless work on that project waits for the user to close it.
+// while one is open, headless work on that app waits for the user to close it. Keyed by app id.
 const visible = new Map<string, { browser: Browser, kind: 'login' | 'record' }>()
 
 export const SHOT_SIZES: Record<string, { width: number, height: number }> = {
@@ -26,9 +28,9 @@ export const SHOT_SIZES: Record<string, { width: number, height: number }> = {
 
 // Visible windows (sign-in, step recording). BOWER_TEST_WINDOWS=headless runs them headless on debugging port
 // 9333 instead, so automated tests can drive them without taking over the screen.
-export function launchVisible(pid: string, width: number) {
+export function launchVisible(appId: string, width: number) {
   const test = process.env.BOWER_TEST_WINDOWS === 'headless'
-  return puppeteer.launch({ headless: test, userDataDir: profileDir(pid), defaultViewport: test ? { width, height: 900 } : null, args: test ? ['--remote-debugging-port=9333'] : [`--window-size=${width},900`] })
+  return puppeteer.launch({ headless: test, userDataDir: profileDir(appId), defaultViewport: test ? { width, height: 900 } : null, args: test ? ['--remote-debugging-port=9333'] : [`--window-size=${width},900`] })
 }
 export async function showVisible(browser: Browser) {
   if (process.env.BOWER_TEST_WINDOWS !== 'headless') await showBrowserWindow(browser.process()?.pid)
@@ -40,31 +42,39 @@ export function resolveTarget(base: string, target: string) {
   return `${base}/${t.replace(/^\//, '')}`
 }
 
-export function loginOpen(pid: string) {
-  return visible.has(pid)
+// The project's shared app, or a plain error when it has none.
+export async function projectApp(pid: string) {
+  const p = await loadProject(pid)
+  if (!p.app) throw createError({ statusCode: 422, message: 'Choose or add the app first, in Settings, App' })
+  return { p, app: p.app }
 }
 
-export function visibleKind(pid: string) {
-  return visible.get(pid)?.kind ?? null
+export async function loginOpen(pid: string) {
+  const p = await loadProject(pid)
+  return !!p.app && visible.has(p.app.id)
 }
 
-export function claimVisible(pid: string, browser: Browser, kind: 'login' | 'record') {
-  visible.set(pid, { browser, kind })
-  browser.on('disconnected', () => { if (visible.get(pid)?.browser === browser) visible.delete(pid) })
+export function visibleKind(appId: string) {
+  return visible.get(appId)?.kind ?? null
 }
 
-// One headless browser per project at a time: Claude's captures, connection checks and crawls queue up instead
+export function claimVisible(appId: string, browser: Browser, kind: 'login' | 'record') {
+  visible.set(appId, { browser, kind })
+  browser.on('disconnected', () => { if (visible.get(appId)?.browser === browser) visible.delete(appId) })
+}
+
+// One headless browser per app at a time: Claude's captures, connection checks and crawls queue up instead
 // of failing because the profile is in use.
 const queues = new Map<string, Promise<unknown>>()
-export function withProfile<T>(pid: string, fn: (browser: Browser) => Promise<T>): Promise<T> {
+export function withProfile<T>(appId: string, fn: (browser: Browser) => Promise<T>): Promise<T> {
   const run = async () => {
-    if (visible.has(pid)) throw createError({ statusCode: 409, message: visible.get(pid)!.kind === 'record' ? 'A step recording is open. Finish it first; Chrome cannot use the profile twice at once' : 'Close the sign-in window first; Chrome cannot use the profile twice at once' })
-    await fs.mkdir(profileDir(pid), { recursive: true })
-    const browser = await puppeteer.launch({ headless: true, userDataDir: profileDir(pid), args: CHROME_ARGS })
+    if (visible.has(appId)) throw createError({ statusCode: 409, message: visible.get(appId)!.kind === 'record' ? 'A step recording is open. Finish it first; Chrome cannot use the profile twice at once' : 'Close the sign-in window first; Chrome cannot use the profile twice at once' })
+    await fs.mkdir(profileDir(appId), { recursive: true })
+    const browser = await puppeteer.launch({ headless: true, userDataDir: profileDir(appId), args: CHROME_ARGS })
     try { return await fn(browser) } finally { await browser.close().catch(() => {}) }
   }
-  const next = (queues.get(pid) ?? Promise.resolve()).catch(() => {}).then(run)
-  queues.set(pid, next)
+  const next = (queues.get(appId) ?? Promise.resolve()).catch(() => {}).then(run)
+  queues.set(appId, next)
   return next
 }
 
@@ -95,35 +105,34 @@ const signedOutMessage = (app: string, url: string) => {
 
 // After loading a page: if the app sent us to its sign-in page, sign in with the saved login and load the page
 // again, or stop with a clear message. Never saves a picture of the login screen by accident.
-async function ensureSignedIn(pid: string, app: string, page: Page, url: string) {
+async function ensureSignedIn(appId: string, app: string, page: Page, url: string) {
   if (!await landedOnSignIn(page, url)) return
   // This page needs sign-in, so it is a good one to check the session against later.
-  await updateSession(pid, { home: url })
-  if (!await getSavedLogin(pid)) {
-    await updateSession(pid, { signedIn: false, checkedAt: new Date().toISOString() })
+  await updateSession(appId, { home: url })
+  if (!await getSavedLogin(appId)) {
+    await updateSession(appId, { signedIn: false, checkedAt: new Date().toISOString() })
     throw createError({ statusCode: 401, message: signedOutMessage(app, url) })
   }
   try {
-    await signInWithSavedLogin(pid, page)
+    await signInWithSavedLogin(appId, page)
   } catch (e) {
-    await updateSession(pid, { signedIn: false, checkedAt: new Date().toISOString(), error: `Saved login: ${(e as Error).message}` })
+    await updateSession(appId, { signedIn: false, checkedAt: new Date().toISOString(), error: `Saved login: ${(e as Error).message}` })
     throw createError({ statusCode: 401, message: `Bower is signed out of the app, and signing in with the saved login failed: ${(e as Error).message}.` })
   }
   await open(page, url)
   if (await landedOnSignIn(page, url)) throw createError({ statusCode: 401, message: signedOutMessage(app, url) })
-  await updateSession(pid, { signedIn: true, checkedAt: new Date().toISOString(), error: undefined })
+  await updateSession(appId, { signedIn: true, checkedAt: new Date().toISOString(), error: undefined })
 }
 
 // A visible browser window on the user's own session, so they can sign in. Closing it keeps the session, and
 // the page it was left on becomes the page Bower checks the session against.
 export async function openLogin(pid: string, target?: string) {
-  const p = await loadProject(pid)
-  if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address first' })
-  if (visible.has(pid)) return { open: true }
-  await fs.mkdir(profileDir(pid), { recursive: true })
-  const browser = await launchVisible(pid, 1280)
-  claimVisible(pid, browser, 'login')
-  const origin = new URL(p.app.url).origin
+  const { app } = await projectApp(pid)
+  if (visible.has(app.id)) return { open: true }
+  await fs.mkdir(profileDir(app.id), { recursive: true })
+  const browser = await launchVisible(app.id, 1280)
+  claimVisible(app.id, browser, 'login')
+  const origin = new URL(app.url).origin
   let last = '', sawLogin = false
   browser.on('targetchanged', (t) => {
     const u = t.url()
@@ -133,17 +142,19 @@ export async function openLogin(pid: string, target?: string) {
   })
   browser.on('disconnected', () => {
     // Only a page reached after the sign-in page, or one deeper than the home page, says something about the session.
-    if (last && (sawLogin || new URL(last).pathname !== '/')) updateSession(pid, { home: last, signedIn: true, checkedAt: new Date().toISOString(), error: undefined }).catch(() => {})
+    if (last && (sawLogin || new URL(last).pathname !== '/')) updateSession(app.id, { home: last, signedIn: true, checkedAt: new Date().toISOString(), error: undefined }).catch(() => {})
   })
   const page = (await browser.pages())[0] ?? await browser.newPage()
-  await page.goto(resolveTarget(p.app.url, target || ''), { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {})
+  await page.goto(resolveTarget(app.url, target || ''), { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {})
   await showVisible(browser)
   return { open: true }
 }
 
 export async function closeLogin(pid: string) {
-  await visible.get(pid)?.browser.close().catch(() => {})
-  visible.delete(pid)
+  const p = await loadProject(pid)
+  if (!p.app) return
+  await visible.get(p.app.id)?.browser.close().catch(() => {})
+  visible.delete(p.app.id)
 }
 
 export interface CheckResult { reachable: boolean, status?: number, signedIn: boolean | null, autoSignedIn?: boolean, page?: string, title?: string, error?: string, checkedAt: string, loginOpen?: boolean }
@@ -151,13 +162,12 @@ export interface CheckResult { reachable: boolean, status?: number, signedIn: bo
 // "Test connection": can Bower reach the app, and is it signed in? Checks the page the sign-in window was left
 // on (a page that needs sign-in), or the app address when there is none yet.
 export async function checkApp(pid: string): Promise<CheckResult> {
-  const p = await loadProject(pid)
-  if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address first' })
+  const { app } = await projectApp(pid)
   const at = () => new Date().toISOString()
-  if (visible.has(pid)) return { reachable: true, signedIn: null, checkedAt: at(), loginOpen: true }
-  const session = await readSession(pid)
-  const url = session.home && session.home.startsWith(new URL(p.app.url).origin) ? session.home : p.app.url
-  const result = await withProfile(pid, async (browser) => {
+  if (visible.has(app.id)) return { reachable: true, signedIn: null, checkedAt: at(), loginOpen: true }
+  const session = await readSession(app.id)
+  const url = session.home && session.home.startsWith(new URL(app.url).origin) ? session.home : app.url
+  const result = await withProfile(app.id, async (browser) => {
     const page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 800 })
     let res: HTTPResponse | null
@@ -170,9 +180,9 @@ export async function checkApp(pid: string): Promise<CheckResult> {
     const title = await page.title().catch(() => '')
     if (status >= 500) return { reachable: true, status, signedIn: null, page: page.url(), title, error: `The site answered with an error (${status}). It may be broken right now; a developer can check its logs.`, checkedAt: at() } as CheckResult
     if (await landedOnSignIn(page, url)) {
-      if (!await getSavedLogin(pid)) return { reachable: true, status, signedIn: false, page: page.url(), title, checkedAt: at() } as CheckResult
+      if (!await getSavedLogin(app.id)) return { reachable: true, status, signedIn: false, page: page.url(), title, checkedAt: at() } as CheckResult
       try {
-        await signInWithSavedLogin(pid, page)
+        await signInWithSavedLogin(app.id, page)
         return { reachable: true, status, signedIn: true, autoSignedIn: true, page: page.url(), title: await page.title().catch(() => ''), checkedAt: at() } as CheckResult
       } catch (e) {
         return { reachable: true, status, signedIn: false, page: page.url(), title, error: `Signing in with the saved login failed: ${(e as Error).message}.`, checkedAt: at() } as CheckResult
@@ -181,7 +191,7 @@ export async function checkApp(pid: string): Promise<CheckResult> {
     // Without a known page behind the sign-in, a page that loads fine only says the site is up.
     return { reachable: true, status, signedIn: session.home ? true : null, page: page.url(), title, error: status >= 400 ? `The page answered ${status}.` : undefined, checkedAt: at() } as CheckResult
   })
-  await updateSession(pid, { reachable: result.reachable, signedIn: result.signedIn ?? undefined, checkedAt: result.checkedAt, error: result.error, title: result.title })
+  await updateSession(app.id, { reachable: result.reachable, signedIn: result.signedIn ?? undefined, checkedAt: result.checkedAt, error: result.error, title: result.title })
   return result
 }
 
@@ -192,9 +202,8 @@ export interface Shot { name: string, path: string, url: string, page: string, t
 // Opens the page, runs the steps (see steps.ts) and saves a PNG for each `shot` step, or one at the end when
 // there is none. A failing step still saves a PNG of where the page got to, so Claude can see what went wrong.
 export async function captureShot(pid: string, opts: ShotOptions) {
-  const p = await loadProject(pid)
-  if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address in Settings, App first' })
-  const app = p.app.url
+  const { app: shared } = await projectApp(pid)
+  const app = shared.url
   const steps = parseSteps(opts.steps)
   const preset = SHOT_SIZES[opts.size ?? ''] ?? SHOT_SIZES.desktop!
   const width = Math.min(3000, Math.max(320, Math.round(opts.width || preset.width)))
@@ -204,12 +213,12 @@ export async function captureShot(pid: string, opts: ShotOptions) {
   const url = resolve(opts.target || '/')
   await fs.mkdir(shotsDir(pid), { recursive: true })
 
-  return withProfile(pid, async (browser) => {
+  return withProfile(shared.id, async (browser) => {
     const page = await browser.newPage()
     await page.setViewport({ width, height, deviceScaleFactor: scale })
     await installFinder(page)
     await open(page, url)
-    await ensureSignedIn(pid, app, page, url)
+    await ensureSignedIn(shared.id, app, page, url)
     await new Promise(r => setTimeout(r, 600)) // let entrance animations settle
 
     const shots: Shot[] = []
@@ -224,7 +233,7 @@ export async function captureShot(pid: string, opts: ShotOptions) {
       return shot
     }
     try {
-      await runSteps(page, steps, { resolve, shot: async (name, full) => { await save(name, full) }, navigated: u => ensureSignedIn(pid, app, page, u) })
+      await runSteps(page, steps, { resolve, shot: async (name, full) => { await save(name, full) }, navigated: u => ensureSignedIn(shared.id, app, page, u) })
     } catch (e) {
       if (!(e instanceof StepError)) throw e
       const done = [...shots]

@@ -1,8 +1,9 @@
 import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { readSession } from './session'
-import { describeNetError, withProfile } from './shots'
-import { loadProject, projectDir, saveProject } from './store'
+import { updateApp } from './apps'
+import { describeNetError, projectApp, withProfile } from './shots'
+import { projectDir } from './store'
 
 // "Getting around" notes written by Claude: Bower walks the signed-in app's menus (headless, on the project's
 // profile), collects each page's title, headings, buttons and table columns, and Claude turns that into a short
@@ -19,9 +20,9 @@ export function getNotesJob(pid: string) {
   return j ? { status: j.status, startedAt: j.startedAt, activity: j.activity.slice(-4), error: j.error } : null
 }
 
-async function crawl(pid: string, base: string, start: string, job: NotesJob) {
+async function crawl(appId: string, base: string, start: string, job: NotesJob) {
   const origin = new URL(base).origin
-  return withProfile(pid, async (browser) => {
+  return withProfile(appId, async (browser) => {
     const page = await browser.newPage()
     await page.setViewport({ width: 1440, height: 900 })
     try { await page.goto(start, { waitUntil: 'networkidle2', timeout: 45_000 }) } catch (e) { throw new Error(describeNetError(e, start)) }
@@ -58,15 +59,14 @@ async function crawl(pid: string, base: string, start: string, job: NotesJob) {
 
 export async function startNotes(pid: string) {
   if (jobs.get(pid)?.status === 'running') return getNotesJob(pid)!
-  const p = await loadProject(pid)
-  if (!p.app) throw createError({ statusCode: 422, message: 'Set the app address first' })
+  const { app } = await projectApp(pid)
   const job: NotesJob = { status: 'running', startedAt: Date.now(), activity: ['Opening the app…'] }
   jobs.set(pid, job)
-  const session = await readSession(pid)
-  const start = session.home && session.home.startsWith(new URL(p.app.url).origin) ? session.home : p.app.url
+  const session = await readSession(app.id)
+  const start = session.home && session.home.startsWith(new URL(app.url).origin) ? session.home : app.url
 
   ;(async () => {
-    const found = await crawl(pid, p.app!.url, start, job)
+    const found = await crawl(app.id, app.url, start, job)
     if (!found.pages.length) throw new Error('Bower could not open any page of the app')
     if (found.pages.every(pg => /sign ?in|log ?in/i.test(pg.title))) throw new Error('Every page showed the sign-in screen. Sign in first (Open browser), then try again')
     job.activity.push('Claude is writing the notes…')
@@ -101,10 +101,8 @@ export async function startNotes(pid: string) {
       })
       proc.stdin.end(prompt)
     })
-    const fresh = await loadProject(pid)
-    if (!fresh.app) throw new Error('The app address was removed')
-    fresh.app.notes = text.slice(0, 2000)
-    await saveProject(fresh)
+    // The notes belong to the shared app, so every project about it gets them.
+    await updateApp(app.id, { notes: text.slice(0, 2000) })
     job.status = 'done'
   })().catch((e) => {
     job.status = 'error'
