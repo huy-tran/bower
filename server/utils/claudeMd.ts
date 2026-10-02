@@ -16,6 +16,7 @@ const BOWER_TOOL = `#!/usr/bin/env node
 //   node bower.mjs shot <page> [size] [full] [steps] screenshot of a page of the running product (size: desktop, laptop, tablet, mobile)
 //       steps: a JSON array of actions to run first, or @file.json holding one, for example
 //       '[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' (see "The running product" in CLAUDE.md)
+//   node bower.mjs record <page> [size] <steps>      video clip of a flow through the running product, played like a person
 import { readFileSync } from 'node:fs'
 const base = process.env.BOWER_URL, pid = process.env.BOWER_PROJECT
 const [cmd, ...args] = process.argv.slice(2)
@@ -28,13 +29,23 @@ async function call(path, init = {}) {
   return j
 }
 try {
-  if (cmd === 'shot' && args[0]) {
+  if ((cmd === 'shot' || cmd === 'record') && args[0]) {
     // Git Bash on Windows rewrites an argument like /contacts into C:/Program Files/Git/contacts. Undo that.
     const msys = (process.env.EXEPATH || '').replace(/\\\\/g, '/').replace(/\\/((usr|mingw64)\\/)?(bin|cmd)\\/?$/, '')
     if (msys && args[0].replace(/\\\\/g, '/').toLowerCase().startsWith(msys.toLowerCase() + '/')) args[0] = args[0].replace(/\\\\/g, '/').slice(msys.length)
-    const size = args.find(a => ['desktop', 'laptop', 'tablet', 'mobile'].includes(a))
-    const raw = args.slice(1).find(a => a.startsWith('[') || a.startsWith('@'))
-    const steps = raw ? JSON.parse(raw.startsWith('@') ? readFileSync(raw.slice(1), 'utf8') : raw) : undefined
+  }
+  const size = args.find(a => ['desktop', 'laptop', 'tablet', 'mobile'].includes(a))
+  const rawSteps = args.slice(1).find(a => a.startsWith('[') || a.startsWith('@'))
+  const steps = rawSteps ? JSON.parse(rawSteps.startsWith('@') ? readFileSync(rawSteps.slice(1), 'utf8') : rawSteps) : undefined
+  if (cmd === 'record' && args[0]) {
+    console.log('Recording the flow (it plays at a person\\'s pace, so this takes as long as the flow)...')
+    const r = await call('/api/projects/' + pid + '/app/recordings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, steps }) })
+    console.log(r.path + '  (' + r.width + 'x' + r.height + ', ' + (r.duration / 1000).toFixed(2) + 's, ' + r.fps + ' fps, ' + Math.round(r.bytes / 1024) + ' KB)')
+    console.log('Poster (first frame, Read it to see): ' + r.poster)
+    console.log('When each step happens in the clip:')
+    for (const m of r.markers) console.log('  ' + String(m.t).padStart(6) + 'ms  step ' + m.step + ': ' + m.label)
+    console.log('Use it in a scene: <video data-ve-clip data-start="0" src="' + r.url + '"></video> (see "Video clips of real flows" in CLAUDE.md)')
+  } else if (cmd === 'shot' && args[0]) {
     const j = await call('/api/projects/' + pid + '/app/shots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, fullPage: args.includes('full'), steps }) })
     for (const s of j.shots) console.log(s.path + '  (' + s.width + 'x' + s.height + (s.fullPage ? ', full page' : '') + (s.title ? ', "' + s.title + '"' : '') + ')')
     console.log((j.shots.length > 1 ? 'Read these PNGs to see them. To show one inside a scene use the src /api/projects/' + pid + '/files/<path>' : 'Read this PNG to see it. To show it inside a scene use the src ' + j.shots[0].url))
@@ -47,7 +58,7 @@ try {
     if (!j.seams.length) console.log('No cuts to check.')
     for (const s of j.seams) console.log(s.fromTitle + ' -> ' + s.toTitle + ': ' + s.diff.toFixed(2) + '% of pixels differ' + (s.transition ? ' (' + s.transition.type + ' transition)' : ' (hard cut)') + '. Image (last frame | first frame | changed pixels in red): ' + s.path)
   } else {
-    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId] | node bower.mjs shot <page> [size] [full] [steps]')
+    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId] | node bower.mjs shot <page> [size] [full] [steps] | node bower.mjs record <page> [size] <steps>')
   }
 } catch (e) { console.error(String(e.message || e)); process.exit(1) }
 `
@@ -169,6 +180,33 @@ function appSection(p: Project) {
     'and Alpine behave as for a person. When a step fails, the error names the step and the reason, lists what is visible, and',
     'saves a PNG of the page at that point: Read it, adjust the steps and run again. Do not change the app\'s data unless the',
     'request calls for it: open dialogs and fill forms freely, but cancel rather than save when a real record would be created.',
+    '',
+    '### Video clips of real flows',
+    '',
+    'When the video should show the app in motion (opening a menu, filling a form, a page loading), record the flow itself:',
+    '',
+    '```',
+    'node bower.mjs record /contacts \'[{"click":"Export"},{"wait":"Export contacts"},{"select":"CSV","in":"Format"},{"wait":800}]\'',
+    '```',
+    '',
+    'Same steps as `shot` (a `shot` step becomes a short hold). Bower plays them like a person: the mouse glides to each target',
+    'with a visible cursor and a click ripple, typing is at a human pace, and each step gets a beat. It prints the clip, a poster',
+    'image (Read it) and when each step happens in the clip. Keep flows short (under 20 seconds); record several clips rather than',
+    'one long one. Try fiddly steps with `shot` first: a failing step saves nothing.',
+    '',
+    'Play a clip in a scene with a `<video data-ve-clip>`. The runtime seeks it to the exact frame for every time t, so renders are',
+    'frame-exact; never call play(), set currentTime yourself or use the video\'s own controls or autoplay:',
+    '',
+    '```html',
+    `<video class="screen" data-ve-clip data-start="400" src="/api/projects/${p.id}/files/assets/recordings/<name>.mp4"></video>`,
+    '```',
+    '',
+    '- `data-start`: ms into the scene when the clip begins. Before it the clip holds its first frame, after its end the last frame.',
+    '- `data-from` / `data-to`: trim, in ms of the clip. `data-rate`: speed (2 plays twice as fast, 0.5 half speed).',
+    '- Size and place the `<video>` like an image (absolute position, width, `object-fit: cover`, transforms, a device frame around it).',
+    '  Animate its container in `render(t)`: zoom in on the step being shown, pan, or fade.',
+    '- Lengthen the scene to fit the clip, and time narration and callouts to the step times it printed (add `data-start`).',
+    '- Prefer a clip for anything that moves in the app; prefer screenshots for still screens you want to zoom around.',
     '',
     a.notes.trim() ? `How to get around the app:\n\n${a.notes.trim()}\n` : ''
   ].filter(l => l !== undefined).join('\n').replace(/\n{3,}/g, '\n\n') + '\n'

@@ -150,7 +150,7 @@ async function loadShots() {
   if (!project.value) return
   shots.value = await $fetch(`/api/projects/${project.value.id}/app/shots`).catch(() => [])
   loginOpen.value = (await $fetch<{ open: boolean }>(`/api/projects/${project.value.id}/app/login`).catch(() => ({ open: false }))).open
-  await loadSession()
+  await Promise.all([loadSession(), loadRecordings()])
 }
 
 // Sign-in status, the connection test and the optional saved login (see server/utils/session.ts).
@@ -289,6 +289,27 @@ async function closeLogin() {
   await $fetch(`/api/projects/${project.value!.id}/app/login`, { method: 'DELETE' }).catch(() => {})
   loginOpen.value = false
 }
+// Video clips of real flows (server/utils/flows.ts), recorded from the same page and steps as a screenshot.
+interface ClipItem { name: string, path: string, url: string, posterUrl: string, duration: number, bytes: number }
+const recordings = ref<ClipItem[]>([])
+const recordingClip = ref(false)
+const loadRecordings = async () => { if (project.value) recordings.value = await $fetch<ClipItem[]>(`/api/projects/${project.value.id}/app/recordings`).catch(() => []) }
+async function recordClip() {
+  recordingClip.value = true
+  try {
+    const r = await $fetch<ClipItem>(`/api/projects/${project.value!.id}/app/recordings`, { method: 'POST', body: { target: capture.target, size: capture.size, steps: capture.steps.trim() } })
+    recordings.value = [r, ...recordings.value]
+    toast.add({ title: 'Video recorded', description: `${r.path} · ${(r.duration / 1000).toFixed(1)}s. Ask Claude to use it in a scene.`, color: 'success' })
+  } catch (err: any) {
+    toast.add({ title: 'Could not record', description: err?.data?.message || err?.message, color: 'error', duration: 12000 })
+  } finally {
+    recordingClip.value = false
+  }
+}
+async function deleteRecording(name: string) {
+  recordings.value = await $fetch(`/api/projects/${project.value!.id}/app/recordings/${name}`, { method: 'DELETE' })
+}
+
 async function takeShot() {
   capture.busy = true
   try {
@@ -662,10 +683,28 @@ function download(format: 'srt' | 'vtt') {
               </UFormField>
               <div class="flex items-center justify-between gap-3">
                 <USwitch v-model="capture.fullPage" label="Whole page, not just the first screen" size="sm" />
-                <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen" @click="takeShot" />
+                <div class="flex gap-2">
+                  <UTooltip text="Play the steps like a person and save a video clip scenes can use">
+                    <UButton color="neutral" variant="outline" icon="i-heroicons-film" label="Record video" :loading="recordingClip" :disabled="!appLinked || loginOpen || capture.busy || !capture.steps.trim()" @click="recordClip" />
+                  </UTooltip>
+                  <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen || recordingClip" @click="takeShot" />
+                </div>
               </div>
-              <p class="text-xs text-muted">Claude takes its own screenshots while it works on a scene, so this is only needed when you want to pick the screens yourself.</p>
+              <p class="text-xs text-muted">Claude takes its own screenshots and recordings while it works on a scene, so this is only needed when you want to pick them yourself. Record video needs steps: it plays them with a visible cursor at a natural pace.</p>
             </UCard>
+
+            <div v-if="recordings.length" class="space-y-2">
+              <h3 class="text-sm font-semibold text-highlighted">Video clips</h3>
+              <div class="grid grid-cols-2 gap-3">
+                <div v-for="r in recordings" :key="r.name" class="group relative">
+                  <video :src="r.url" :poster="r.posterUrl" controls muted preload="none" class="aspect-[16/10] w-full rounded-md bg-elevated object-cover object-top ring-1 ring-default" />
+                  <p class="mt-1 truncate font-mono text-[11px] text-muted" :title="r.path">{{ r.name }} · {{ (r.duration / 1000).toFixed(1) }}s · {{ Math.round(r.bytes / 1024) }} KB</p>
+                  <div class="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
+                    <UTooltip text="Delete"><UButton size="xs" color="error" variant="solid" icon="i-heroicons-trash" :aria-label="`Delete ${r.name}`" @click="deleteRecording(r.name)" /></UTooltip>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div v-if="shots.length" class="grid grid-cols-3 gap-3">
               <div v-for="s in shots" :key="s.name" class="group relative">

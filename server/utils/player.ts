@@ -167,7 +167,12 @@ export async function buildPlayer(pid: string, opts: PlayerOptions = {}) {
       f.style.filter = l.filter;
       f.style.zIndex = l.z;
       var id = ++seekId;
-      waits.push(new Promise(function (res) { pending[id] = res; setTimeout(res, 3000); }));
+      // While rendering, a scene that cannot draw its frame (a video clip that will not seek, say) fails the render
+      // rather than letting a stale frame through. In the player, a slow scene just shows what it has.
+      waits.push(new Promise(function (res, rej) {
+        pending[id] = { res: res, rej: rej };
+        setTimeout(function () { if (!pending[id]) return; delete pending[id]; RENDER ? rej(new Error('A scene did not draw its frame within 20 seconds')) : res(); }, RENDER ? 20000 : 3000);
+      }));
       f.contentWindow.postMessage({ __ve: true, type: 'seek', t: l.t, id: id }, '*');
     });
     frames.forEach(function (f, i) { if (!visible[i]) f.style.visibility = 'hidden'; });
@@ -189,7 +194,11 @@ export async function buildPlayer(pid: string, opts: PlayerOptions = {}) {
   window.addEventListener('message', function (e) {
     var d = e.data;
     if (!d || !d.__ve) return;
-    if (d.type === 'seeked' && pending[d.id]) { pending[d.id](); delete pending[d.id]; }
+    if (d.type === 'seeked' && pending[d.id]) {
+      var wait = pending[d.id];
+      delete pending[d.id];
+      if (d.error && RENDER) wait.rej(new Error(d.error)); else wait.res();
+    }
     if (d.type === 'ready') {
       readyCount++;
       if (readyCount === frames.length) resolveReady(true);

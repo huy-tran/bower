@@ -247,34 +247,43 @@ export interface RunHooks {
   resolve: (target: string) => string
   // Called after a `goto` step loads, to catch a session that ran out (see session.ts).
   navigated?: (url: string) => Promise<void>
+  // For recordings (flows.ts): move the mouse to each target like a person, type at a human pace, pause after
+  // each step, and note when each action happens.
+  human?: { move: (el: ElementHandle<Element>) => Promise<void>, mark: (index: number, step: Step) => void, typeDelay: number, pause: number }
 }
 
 // Executes the steps on the page. Throws StepError with the failing step's number and the reason.
 export async function runSteps(page: Page, steps: Step[], hooks: RunHooks) {
   for (const [i, s] of steps.entries()) {
     try {
+      const human = hooks.human
+      const reach = async (el: ElementHandle<Element>) => { if (human) { await human.move(el); human.mark(i, s) } }
       if ('click' in s) {
         const el = await find(page, s.click, 'click', s.nth)
+        await reach(el)
         await el.click()
         await settle(page)
       } else if ('hover' in s) {
         const el = await find(page, s.hover, 'click', s.nth)
+        await reach(el)
         await el.hover()
         await settle(page, 250)
       } else if ('type' in s) {
         const el = await find(page, s.in, 'field', s.nth)
+        await reach(el)
         await el.click().catch(() => el.focus())
         await el.evaluate((e) => {
           if (e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement) e.select()
           else if ((e as HTMLElement).isContentEditable) document.execCommand('selectAll')
         })
         // Real key events, so Livewire, Alpine and input masks see each character.
-        if (s.type) await page.keyboard.type(s.type, { delay: 15 })
+        if (s.type) await page.keyboard.type(s.type, { delay: human?.typeDelay ?? 15 })
         else await page.keyboard.press('Backspace')
         if (s.enter) await page.keyboard.press('Enter')
         await settle(page)
       } else if ('select' in s) {
         const el = await find(page, s.in, 'field', s.nth)
+        await reach(el)
         const value = await el.evaluate((e, want) => {
           if (!(e instanceof HTMLSelectElement)) return null
           const w = want.trim().toLowerCase()
@@ -287,6 +296,7 @@ export async function runSteps(page: Page, steps: Step[], hooks: RunHooks) {
         await el.select(value)
         await settle(page)
       } else if ('press' in s) {
+        human?.mark(i, s)
         await page.keyboard.press(s.press as any)
         await settle(page)
       } else if ('wait' in s) {
@@ -313,12 +323,15 @@ export async function runSteps(page: Page, steps: Step[], hooks: RunHooks) {
         await new Promise(r => setTimeout(r, 250))
       } else if ('goto' in s) {
         const url = hooks.resolve(s.goto)
+        human?.mark(i, s)
         await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 })
         await hooks.navigated?.(url)
         await settle(page, 600)
       } else if ('shot' in s) {
+        human?.mark(i, s)
         await hooks.shot(s.shot, !!s.full, i)
       }
+      if (human && !('wait' in s)) await new Promise(r => setTimeout(r, human.pause))
     } catch (e: any) {
       // A step error, or an HTTP error from a hook (signed out of the app), passes through as it is.
       if (e instanceof StepError || e?.statusCode) throw e

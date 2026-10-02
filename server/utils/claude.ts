@@ -58,7 +58,7 @@ const APP_MODE_LINES: Record<AppMode, string> = {
   auto: 'Choose: real screenshots placed in the scene are more authentic, rebuilt screens are better when parts must animate separately.'
 }
 const appLine = (p: Project, s?: SceneView) => p.app
-  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md) and Read them. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms. ${APP_MODE_LINES[s?.app ?? p.app.mode ?? 'auto']}${s?.app ? ' (This scene sets this in the "app" key of its meta block; keep the key.)' : ''} An explicit instruction in the request overrides this.`
+  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md) and Read them. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms. To show the app in motion, \`node bower.mjs record <page> <steps>\` records the flow as a video clip (see "Video clips of real flows" in CLAUDE.md). ${APP_MODE_LINES[s?.app ?? p.app.mode ?? 'auto']}${s?.app ? ' (This scene sets this in the "app" key of its meta block; keep the key.)' : ''} An explicit instruction in the request overrides this.`
   : ''
 
 const codebaseLine = (p: Project) => allCodebases(p).length
@@ -160,6 +160,7 @@ function describeTool(p: Project, c: any) {
     if (/bower\.mjs\s+snap/.test(cmd)) return 'Looking at frames'
     if (/bower\.mjs\s+seam/.test(cmd)) return 'Checking the cuts'
     if (/bower\.mjs\s+shot/.test(cmd)) return `Screenshotting ${cmd.replace(/.*bower\.mjs\s+shot\s*/, '').slice(0, 50)}`
+    if (/bower\.mjs\s+record/.test(cmd)) return `Recording ${cmd.replace(/.*bower\.mjs\s+record\s*/, '').slice(0, 50)}`
     return `Running ${cmd.slice(0, 60)}`
   }
   const f = c.input?.file_path || c.input?.pattern || c.input?.path || ''

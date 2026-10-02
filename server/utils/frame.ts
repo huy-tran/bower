@@ -6,7 +6,7 @@ import { projectDir, sceneBeats, type Project, type SceneView } from './store'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp',
-  '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.mp4': 'video/mp4', '.json': 'application/json'
+  '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.mp4': 'video/mp4', '.webm': 'video/webm', '.json': 'application/json'
 }
 
 // Swap /api/projects/<id>/files/(assets|brand)/... URLs for data URIs so a scene works with no server.
@@ -27,7 +27,7 @@ export interface FrameOptions { transparent?: boolean }
 
 // The full document a scene runs in: stage, runtime, music context, brand fonts and the scene fragment.
 export async function buildFrame(p: Project, s: SceneView, html: string, opts: FrameOptions = {}) {
-  const ctx = { sceneId: s.id, width: p.width, height: p.height, ...sceneBeats(p, s.start, s.duration) }
+  const ctx = { sceneId: s.id, width: p.width, height: p.height, fps: p.fps, ...sceneBeats(p, s.start, s.duration) }
   const kit = await projectBrand(p.id)
   const brandFonts = kit ? googleFontsHref([kit.fonts.heading, kit.fonts.body]) : null
   const bg = opts.transparent ? 'transparent' : '#fff'

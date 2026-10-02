@@ -90,7 +90,7 @@ export function describeNetError(err: unknown, url: string) {
   return `Could not open ${url}: ${m.replace(/^.*?(net::)/, '$1').split('\n')[0]}`
 }
 
-async function open(page: Page, url: string) {
+export async function open(page: Page, url: string) {
   try {
     return await page.goto(url, { waitUntil: 'networkidle2', timeout: 60_000 })
   } catch (e) {
@@ -105,7 +105,7 @@ const signedOutMessage = (app: string, url: string) => {
 
 // After loading a page: if the app sent us to its sign-in page, sign in with the saved login and load the page
 // again, or stop with a clear message. Never saves a picture of the login screen by accident.
-async function ensureSignedIn(appId: string, app: string, page: Page, url: string) {
+export async function ensureSignedIn(appId: string, app: string, page: Page, url: string) {
   if (!await landedOnSignIn(page, url)) return
   // This page needs sign-in, so it is a good one to check the session against later.
   await updateSession(appId, { home: url })

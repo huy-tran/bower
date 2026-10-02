@@ -3,7 +3,7 @@ import { extname, join, normalize, sep } from 'node:path'
 
 const TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
-  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'audio/webm', '.srt': 'text/plain', '.vtt': 'text/vtt', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.srt': 'text/plain', '.vtt': 'text/vtt', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml',
   '.webp': 'image/webp', '.gif': 'image/gif', '.woff2': 'font/woff2', '.json': 'application/json'
 }
 
@@ -23,10 +23,16 @@ export default defineEventHandler(async (event) => {
   setHeader(event, 'X-Content-Type-Options', 'nosniff')
   if (getQuery(event).download) setHeader(event, 'Content-Disposition', `attachment; filename="${rel.split(/[\\/]/).pop()}"`)
 
+  // Video seeking asks for byte ranges, including "the last N bytes" (bytes=-N).
   const range = getHeader(event, 'range')?.match(/bytes=(\d*)-(\d*)/)
-  if (range) {
-    const start = range[1] ? Number(range[1]) : 0
-    const end = range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, stat.size - Number(range[2]))
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1
+    if (start > end || start >= stat.size) {
+      setResponseStatus(event, 416)
+      setHeader(event, 'Content-Range', `bytes */${stat.size}`)
+      return ''
+    }
     setResponseStatus(event, 206)
     setHeader(event, 'Content-Range', `bytes ${start}-${end}/${stat.size}`)
     setHeader(event, 'Content-Length', end - start + 1)
