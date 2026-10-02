@@ -257,8 +257,8 @@ function download(format: 'srt' | 'vtt') {
   <UModal v-model:open="open" :title="project?.name" description="Project settings" :ui="{ content: 'max-w-4xl', body: 'p-0 sm:p-0', footer: 'justify-between' }">
     <template #body>
       <VoicePicker v-model:open="pickerOpen" />
-      <div class="grid min-h-[60vh] grid-cols-[11rem_1fr]">
-        <UTabs v-model="tab" :items="tabs" orientation="vertical" :content="false" color="neutral" variant="link" class="h-full border-r border-default p-2" :ui="{ root: 'items-start justify-start', list: 'w-full', trigger: 'justify-start' }" />
+      <div class="grid min-h-[60vh] grid-cols-[12rem_1fr]">
+        <UTabs v-model="tab" :items="tabs" orientation="vertical" :content="false" color="neutral" variant="link" class="h-full border-r border-default px-3 py-4" :ui="{ root: 'items-start justify-start', list: 'w-full gap-1', trigger: 'justify-start gap-2.5 px-3 py-2' }" />
         <div class="max-h-[70vh] overflow-y-auto p-5">
           <div class="mb-5 border-b border-default pb-4">
             <h2 class="flex items-center gap-2 text-base font-semibold text-highlighted"><UIcon :name="current.icon" class="size-5" /> {{ current.label }}</h2>
