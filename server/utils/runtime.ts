@@ -75,6 +75,66 @@ export const SCENE_RUNTIME = String.raw`
   // the same frame for the same t every time. Recorded clips have a keyframe on every frame, and the seek aims
   // at the middle of a frame so rounding can never land on its neighbour. Optional attributes, all in ms:
   // data-start (when the clip starts in the scene), data-from / data-to (trim), data-rate (speed), data-fps.
+  // Live UI snapshots (<ve-ui src="assets/ui/....html">, saved by Bower from the running app): the markup goes in a
+  // shadow root so the app's CSS and the scene's never meet; @font-face and @property rules, which only work at
+  // document level, go in the document head. Everything waits until they are in and their images decoded.
+  var uiDone = false, resolveUi;
+  var uiReady = new Promise(function (res) { resolveUi = res; });
+  // Apps animate their own style changes with CSS transitions, which would run in real time when a scene sets a
+  // style: off inside snapshots, as in any scene. The caret is hidden too (it blinks on its own clock).
+  var UI_HOST = ':host{all:initial;display:block;position:relative;overflow:hidden;contain:layout paint;width:1440px;height:900px}' +
+    '*,*::before,*::after{transition:none!important;caret-color:transparent!important}';
+  function loadUi(host) {
+    var src = host.getAttribute('src');
+    return fetch(src).then(function (r) {
+      if (!r.ok) throw new Error('A live UI snapshot could not be loaded: ' + src);
+      return r.text();
+    }).then(function (text) {
+      var m = text.match(/^<!--ve-ui (.*?)-->/), meta = {};
+      try { meta = m ? JSON.parse(m[1]) : {}; } catch (e) {}
+      var g = text.match(/<style data-ve-global>([\s\S]*?)<\/style>/);
+      if (g && g[1].trim() && !document.querySelector('style[data-ve-ui="' + src + '"]')) {
+        var st = document.createElement('style');
+        st.setAttribute('data-ve-ui', src);
+        st.textContent = g[1];
+        document.head.appendChild(st);
+      }
+      var root = host.shadowRoot || host.attachShadow({ mode: 'open' });
+      var size = UI_HOST.replace('1440px', (meta.width || 1440) + 'px').replace('900px', (meta.height || 900) + 'px');
+      // Parsed in an inert template and cleaned again before it goes live: the capture already removed scripts
+      // and handlers, but a snapshot is markup from another site, and scenes run in the editor's own origin.
+      var tpl = document.createElement('template');
+      tpl.innerHTML = text.replace(/<style data-ve-global>[\s\S]*?<\/style>/, '');
+      tpl.content.querySelectorAll('script, iframe, object, embed, link, meta, base').forEach(function (el) { el.remove(); });
+      tpl.content.querySelectorAll('*').forEach(function (el) {
+        Array.prototype.slice.call(el.attributes).forEach(function (a) {
+          if (/^on/i.test(a.name) || a.name === 'autofocus' || (/^(href|src|xlink:href|action|formaction)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) el.removeAttribute(a.name);
+        });
+      });
+      var hostStyle = document.createElement('style');
+      hostStyle.textContent = size;
+      root.replaceChildren(hostStyle, tpl.content);
+      // The page's own scroll position, and boxes that were scrolled (a sidebar, a long table).
+      var body = root.querySelector('[data-ve-body]');
+      var y = body ? parseFloat(body.getAttribute('data-ve-page-scroll')) || 0 : 0;
+      if (y) body.style.transform = 'translateY(' + (-y) + 'px)';
+      root.querySelectorAll('[data-ve-scroll]').forEach(function (el) {
+        var p = el.getAttribute('data-ve-scroll').split(',');
+        el.scrollTop = +p[0] || 0; el.scrollLeft = +p[1] || 0;
+      });
+      return Promise.all(Array.prototype.map.call(root.querySelectorAll('img'), function (img) {
+        return img.decode ? img.decode().catch(function () {}) : null;
+      }));
+    });
+  }
+  function hydrateUi() {
+    var hosts = document.querySelectorAll('ve-ui[src]');
+    var all = Array.prototype.map.call(hosts, loadUi);
+    return Promise.all(all).then(function () { return document.fonts ? document.fonts.ready : null; })
+      .catch(function (e) { report('error', { message: String(e && e.message || e) }); })
+      .then(function () { uiDone = true; resolveUi(); });
+  }
+
   var CLIP_TIMEOUT = 8000;
   function clipReady(v) {
     if (!v.__ve) {
@@ -141,12 +201,49 @@ export const SCENE_RUNTIME = String.raw`
     $: function (s) { return document.querySelector(s); },
     $$: function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); },
     scene: function (d) { def = d; fit(); Promise.resolve(VE.seek(cur)).catch(function () {}); },
+    // Live UI snapshots: VE.ui('.screen') reaches inside a <ve-ui> (its shadow root). ui.$ / ui.$$ query it,
+    // ui.handle('b3') finds a tagged element ([data-ve="b3"]), ui.text('Export') the element showing that text.
+    ui: function (sel) {
+      var host = typeof sel === 'string' ? document.querySelector(sel) : sel;
+      var root = function () { return host && host.shadowRoot; };
+      var q = function (s) { var r = root(); return r ? r.querySelector(s) : null; };
+      return {
+        host: host,
+        get root() { return root(); },
+        $: q,
+        $$: function (s) { var r = root(); return r ? Array.prototype.slice.call(r.querySelectorAll(s)) : []; },
+        handle: function (id) { return q('[data-ve="' + id + '"]'); },
+        text: function (want) {
+          var r = root(); if (!r) return null;
+          var w = String(want).replace(/\s+/g, ' ').trim().toLowerCase(), best = null;
+          r.querySelectorAll('*').forEach(function (el) {
+            var t = (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+            if (t === w && (!best || best.contains(el))) best = el;
+          });
+          return best;
+        }
+      };
+    },
+    // Types text into a field (or any element) as a function of t: the first n characters, n growing at cps
+    // characters a second from start. Deterministic, so a render shows the same letters at the same time.
+    type: function (el, text, t, start, cps) {
+      if (!el) return 0;
+      var n = Math.max(0, Math.min(text.length, Math.floor((t - (start || 0)) * (cps || 14) / 1000)));
+      var v = text.slice(0, n);
+      if ('value' in el) { el.value = v; el.setAttribute('value', v); } else el.textContent = v;
+      return n;
+    },
     // Sets every animated property for time t. Returns a promise when video clips have to reach their frame.
     seek: function (t) {
       cur = t;
+      // Until live UI snapshots are in, render(t) would find nothing to animate: wait for them first.
+      if (!uiDone) return uiReady.then(function () { return VE.seek(cur); });
       try {
         if (def && def.render) def.render(t, VE);
         document.getAnimations().forEach(function (a) { a.pause(); a.currentTime = t; });
+        // Animations inside live UI snapshots (an app's spinners, say) live in shadow roots, which document.getAnimations()
+        // does not see.
+        document.querySelectorAll('ve-ui').forEach(function (h) { if (h.shadowRoot) h.shadowRoot.getAnimations().forEach(function (a) { a.pause(); a.currentTime = t; }); });
       } catch (e) {
         report('error', { message: String(e && e.message || e) });
         throw e;
@@ -180,7 +277,8 @@ export const SCENE_RUNTIME = String.raw`
     fit();
     var q = new URLSearchParams(location.search).get('t');
     Promise.resolve(VE.seek(q ? parseFloat(q) : cur)).catch(function () {});
-    report('ready', { duration: VE.duration });
+    // Ready once live UI snapshots are in, so the renderer's first frame already shows them.
+    hydrateUi().then(function () { report('ready', { duration: VE.duration }); });
   });
 })();
 `

@@ -6,7 +6,7 @@ import { projectDir, sceneBeats, type Project, type SceneView } from './store'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.webp': 'image/webp',
-  '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.mp4': 'video/mp4', '.webm': 'video/webm', '.json': 'application/json'
+  '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.mp4': 'video/mp4', '.webm': 'video/webm', '.json': 'application/json', '.html': 'text/html', '.ttf': 'font/ttf', '.otf': 'font/otf', '.avif': 'image/avif', '.ico': 'image/x-icon'
 }
 
 // Swap /api/projects/<id>/files/(assets|brand)/... URLs for data URIs so a scene works with no server.
@@ -15,7 +15,9 @@ export async function inlineAssets(p: Project, html: string) {
   const found = [...new Set([...html.matchAll(re)].map(m => m[1]!))]
   for (const rel of found) {
     try {
-      const data = await fs.readFile(join(projectDir(p.id), decodeURIComponent(rel)))
+      let data = await fs.readFile(join(projectDir(p.id), decodeURIComponent(rel)))
+      // A live UI snapshot (assets/ui/*.html) refers to its own fonts and images: inline those first.
+      if (/^assets\/ui\/[^/]+\.html$/.test(rel)) data = Buffer.from(await inlineAssets(p, data.toString('utf8')))
       const uri = `data:${MIME[extname(rel).toLowerCase()] || 'application/octet-stream'};base64,${data.toString('base64')}`
       html = html.split(`/api/projects/${p.id}/files/${rel}`).join(uri)
     } catch {}

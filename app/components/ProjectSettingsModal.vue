@@ -150,7 +150,7 @@ async function loadShots() {
   if (!project.value) return
   shots.value = await $fetch(`/api/projects/${project.value.id}/app/shots`).catch(() => [])
   loginOpen.value = (await $fetch<{ open: boolean }>(`/api/projects/${project.value.id}/app/login`).catch(() => ({ open: false }))).open
-  await Promise.all([loadSession(), loadRecordings()])
+  await Promise.all([loadSession(), loadRecordings(), loadUiSnaps()])
 }
 
 // Sign-in status, the connection test and the optional saved login (see server/utils/session.ts).
@@ -305,6 +305,26 @@ async function recordClip() {
   } finally {
     recordingClip.value = false
   }
+}
+// Live UI snapshots (server/utils/uisnap.ts): the page's real markup and CSS, after the same steps.
+interface UiItem { name: string, path: string, previewUrl: string, bytes: number, handles: unknown[] }
+const uiSnaps = ref<UiItem[]>([])
+const capturingUi = ref(false)
+const loadUiSnaps = async () => { if (project.value) uiSnaps.value = await $fetch<UiItem[]>(`/api/projects/${project.value.id}/app/ui`).catch(() => []) }
+async function captureLiveUi() {
+  capturingUi.value = true
+  try {
+    const u = await $fetch<UiItem>(`/api/projects/${project.value!.id}/app/ui`, { method: 'POST', body: { target: capture.target, size: capture.size, steps: capture.steps.trim() || undefined } })
+    uiSnaps.value = [u, ...uiSnaps.value]
+    toast.add({ title: 'Live UI saved', description: `${u.path} · ${Math.round(u.bytes / 1024)} KB. Ask Claude to animate it in a scene.`, color: 'success' })
+  } catch (err: any) {
+    toast.add({ title: 'Could not capture the live UI', description: err?.data?.message || err?.message, color: 'error', duration: 12000 })
+  } finally {
+    capturingUi.value = false
+  }
+}
+async function deleteUiSnap(name: string) {
+  uiSnaps.value = await $fetch(`/api/projects/${project.value!.id}/app/ui/${name}`, { method: 'DELETE' })
 }
 async function deleteRecording(name: string) {
   recordings.value = await $fetch(`/api/projects/${project.value!.id}/app/recordings/${name}`, { method: 'DELETE' })
@@ -684,14 +704,30 @@ function download(format: 'srt' | 'vtt') {
               <div class="flex items-center justify-between gap-3">
                 <USwitch v-model="capture.fullPage" label="Whole page, not just the first screen" size="sm" />
                 <div class="flex gap-2">
-                  <UTooltip text="Play the steps like a person and save a video clip scenes can use">
-                    <UButton color="neutral" variant="outline" icon="i-heroicons-film" label="Record video" :loading="recordingClip" :disabled="!appLinked || loginOpen || capture.busy || !capture.steps.trim()" @click="recordClip" />
+                  <UTooltip text="Save the page's real markup and CSS, so Claude can animate parts of it">
+                    <UButton color="neutral" variant="outline" icon="i-heroicons-code-bracket-square" label="Live UI" :loading="capturingUi" :disabled="!appLinked || loginOpen || capture.busy || recordingClip" @click="captureLiveUi" />
                   </UTooltip>
-                  <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen || recordingClip" @click="takeShot" />
+                  <UTooltip text="Play the steps like a person and save a video clip scenes can use">
+                    <UButton color="neutral" variant="outline" icon="i-heroicons-film" label="Record video" :loading="recordingClip" :disabled="!appLinked || loginOpen || capture.busy || capturingUi || !capture.steps.trim()" @click="recordClip" />
+                  </UTooltip>
+                  <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen || recordingClip || capturingUi" @click="takeShot" />
                 </div>
               </div>
               <p class="text-xs text-muted">Claude takes its own screenshots and recordings while it works on a scene, so this is only needed when you want to pick them yourself. Record video needs steps: it plays them with a visible cursor at a natural pace.</p>
             </UCard>
+
+            <div v-if="uiSnaps.length" class="space-y-2">
+              <h3 class="text-sm font-semibold text-highlighted">Live UI</h3>
+              <div class="grid grid-cols-3 gap-3">
+                <div v-for="u in uiSnaps" :key="u.name" class="group relative">
+                  <img :src="u.previewUrl" :alt="u.name" class="aspect-[16/10] w-full rounded-md bg-elevated object-cover object-top ring-1 ring-default">
+                  <p class="mt-1 truncate font-mono text-[11px] text-muted" :title="u.path">{{ u.name }} · {{ Math.round(u.bytes / 1024) }} KB · {{ u.handles.length }} handles</p>
+                  <div class="absolute top-1.5 right-1.5 flex gap-1 opacity-0 group-hover:opacity-100">
+                    <UTooltip text="Delete"><UButton size="xs" color="error" variant="solid" icon="i-heroicons-trash" :aria-label="`Delete ${u.name}`" @click="deleteUiSnap(u.name)" /></UTooltip>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <div v-if="recordings.length" class="space-y-2">
               <h3 class="text-sm font-semibold text-highlighted">Video clips</h3>

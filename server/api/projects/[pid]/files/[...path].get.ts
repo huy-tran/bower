@@ -4,7 +4,9 @@ import { extname, join, normalize, sep } from 'node:path'
 const TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
   '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.srt': 'text/plain', '.vtt': 'text/vtt', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml',
-  '.webp': 'image/webp', '.gif': 'image/gif', '.woff2': 'font/woff2', '.json': 'application/json'
+  '.webp': 'image/webp', '.gif': 'image/gif', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf', '.avif': 'image/avif', '.json': 'application/json',
+  // Live UI snapshots are fetched by scenes as text, never opened as pages.
+  '.html': 'text/plain; charset=utf-8'
 }
 
 export default defineEventHandler(async (event) => {

@@ -17,6 +17,7 @@ const BOWER_TOOL = `#!/usr/bin/env node
 //       steps: a JSON array of actions to run first, or @file.json holding one, for example
 //       '[{"click":"Export"},{"wait":"Export contacts"},{"shot":"export-modal"}]' (see "The running product" in CLAUDE.md)
 //   node bower.mjs record <page> [size] <steps>      video clip of a flow through the running product, played like a person
+//   node bower.mjs ui <page> [size] [steps]          live UI snapshot: the page's real markup and CSS, for scenes to animate
 import { readFileSync } from 'node:fs'
 const base = process.env.BOWER_URL, pid = process.env.BOWER_PROJECT
 const [cmd, ...args] = process.argv.slice(2)
@@ -29,7 +30,7 @@ async function call(path, init = {}) {
   return j
 }
 try {
-  if ((cmd === 'shot' || cmd === 'record') && args[0]) {
+  if ((cmd === 'shot' || cmd === 'record' || cmd === 'ui') && args[0]) {
     // Git Bash on Windows rewrites an argument like /contacts into C:/Program Files/Git/contacts. Undo that.
     const msys = (process.env.EXEPATH || '').replace(/\\\\/g, '/').replace(/\\/((usr|mingw64)\\/)?(bin|cmd)\\/?$/, '')
     if (msys && args[0].replace(/\\\\/g, '/').toLowerCase().startsWith(msys.toLowerCase() + '/')) args[0] = args[0].replace(/\\\\/g, '/').slice(msys.length)
@@ -37,7 +38,14 @@ try {
   const size = args.find(a => ['desktop', 'laptop', 'tablet', 'mobile'].includes(a))
   const rawSteps = args.slice(1).find(a => a.startsWith('[') || a.startsWith('@'))
   const steps = rawSteps ? JSON.parse(rawSteps.startsWith('@') ? readFileSync(rawSteps.slice(1), 'utf8') : rawSteps) : undefined
-  if (cmd === 'record' && args[0]) {
+  if (cmd === 'ui' && args[0]) {
+    const u = await call('/api/projects/' + pid + '/app/ui', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, steps }) })
+    console.log(u.path + '  (' + u.width + 'x' + u.height + ', ' + Math.round(u.bytes / 1024) + ' KB, ' + u.cssRules + ' of ' + u.cssRulesTotal + ' CSS rules kept, ' + u.assets + ' fonts and images copied)')
+    console.log('Preview (Read it to see the state): ' + u.preview)
+    console.log('Handles, to reach these elements from render(t) with ui.handle(id):')
+    for (const h of u.handles) console.log('  ' + h.id.padEnd(4) + h.kind.padEnd(7) + h.label)
+    console.log('Use it in a scene: <ve-ui class="app" src="' + u.url + '"></ve-ui> and const ui = VE.ui(\\'.app\\') (see "Live UI snapshots" in CLAUDE.md)')
+  } else if (cmd === 'record' && args[0]) {
     console.log('Recording the flow (it plays at a person\\'s pace, so this takes as long as the flow)...')
     const r = await call('/api/projects/' + pid + '/app/recordings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target: args[0], size, steps }) })
     console.log(r.path + '  (' + r.width + 'x' + r.height + ', ' + (r.duration / 1000).toFixed(2) + 's, ' + r.fps + ' fps, ' + Math.round(r.bytes / 1024) + ' KB)')
@@ -58,7 +66,7 @@ try {
     if (!j.seams.length) console.log('No cuts to check.')
     for (const s of j.seams) console.log(s.fromTitle + ' -> ' + s.toTitle + ': ' + s.diff.toFixed(2) + '% of pixels differ' + (s.transition ? ' (' + s.transition.type + ' transition)' : ' (hard cut)') + '. Image (last frame | first frame | changed pixels in red): ' + s.path)
   } else {
-    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId] | node bower.mjs shot <page> [size] [full] [steps] | node bower.mjs record <page> [size] <steps>')
+    console.log('Usage: node bower.mjs snap <sceneId> [ms ...] | node bower.mjs seam [sceneId] | node bower.mjs shot <page> [size] [full] [steps] | node bower.mjs record <page> [size] <steps> | node bower.mjs ui <page> [size] [steps]')
   }
 } catch (e) { console.error(String(e.message || e)); process.exit(1) }
 `
@@ -207,6 +215,42 @@ function appSection(p: Project) {
     '  Animate its container in `render(t)`: zoom in on the step being shown, pan, or fade.',
     '- Lengthen the scene to fit the clip, and time narration and callouts to the step times it printed (add `data-start`).',
     '- Prefer a clip for anything that moves in the app; prefer screenshots for still screens you want to zoom around.',
+    '',
+    '### Live UI snapshots',
+    '',
+    'When parts of a real screen should animate on their own (rows sliding in, a button lighting up, text being typed into a',
+    'field), capture the page as live UI instead of a picture: its real markup and CSS, with fonts and images copied in.',
+    '',
+    '```',
+    'node bower.mjs ui /contacts \'[{"click":"New contact"},{"wait":"Create contact"}]\'',
+    '```',
+    '',
+    'Same steps as `shot`; the snapshot is the state after the last one. It prints a preview PNG (Read it) and **handles**: ids',
+    'for the headings, buttons, fields, table rows and dialogs, like `b3 button Export` or `r2 row Ann a@x.com Active`.',
+    'Put it in a scene and animate it from `render(t)`:',
+    '',
+    '```html',
+    `<ve-ui class="app" src="/api/projects/${p.id}/files/assets/ui/<name>.html"></ve-ui>`,
+    '<script>',
+    '  const ui = VE.ui(\'.app\')',
+    '  VE.scene({ render(t) {',
+    '    const rows = ui.$$(\'tbody tr\')',
+    '    rows.forEach((r, i) => { r.style.opacity = VE.progress(t, 300 + i * 120, 400, \'outCubic\') })',
+    '    ui.handle(\'b3\').style.boxShadow = `0 0 0 ${VE.progress(t, 1800, 300) * 6}px rgba(59,130,246,.45)`',
+    '    VE.type(ui.handle(\'f1\'), \'Jane Doe\', t, 2400)',
+    '  } })',
+    '</script>',
+    '```',
+    '',
+    '- The `<ve-ui>` is the app at its captured size (for example 1440x900). Position and scale it like an image: absolute',
+    '  position plus `transform: scale(...)`, inside a device frame if you like. Do not set its width and height to resize it.',
+    '- `VE.ui(sel)` gives `$`, `$$`, `handle(id)` and `text(\'Export\')` (the element showing exactly that text), all inside the',
+    '  snapshot. Look elements up inside `render(t)` (or once after the first render), not at the top of the script: the snapshot',
+    '  loads after the script runs. Scene CSS cannot reach inside it, so style its elements from `render(t)` as above.',
+    '- `VE.type(el, text, t, start, charsPerSecond = 14)` types into a field over time, deterministically.',
+    '- Everything you change must be set from `t` alone, as for any scene: set opacity, transforms, classes and values every',
+    '  frame, including back to their resting state.',
+    '- Prefer a snapshot over a rebuilt screen when it should look exactly like the product; prefer a clip for real motion.',
     '',
     a.notes.trim() ? `How to get around the app:\n\n${a.notes.trim()}\n` : ''
   ].filter(l => l !== undefined).join('\n').replace(/\n{3,}/g, '\n\n') + '\n'
