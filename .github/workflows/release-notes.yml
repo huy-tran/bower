@@ -1,0 +1,39 @@
+# Keeps every GitHub release's notes in step with CHANGELOG.md: whenever the changelog changes on master (or on a
+# manual run), each "## x.y.z" section is written to the release for tag vx.y.z, if that release exists. New releases
+# get their notes from desktop.yml when they are built; this covers backfilling and later corrections.
+name: Release notes
+
+on:
+  push:
+    branches: [master]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Write each version's notes to its release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for v in $(grep -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md); do
+            # Same extraction as desktop.yml: the section, with wrapped lines joined onto their bullet.
+            awk -v v="$v" '
+              index($0, "## " v " ") == 1 || $0 == "## " v { on = 1; next }
+              /^## / && on { exit }
+              on && /^  [^ ]/ { sub(/^ +/, ""); buf = buf " " $0; next }
+              on { if (started) print buf; buf = $0; started = 1 }
+              END { if (started) print buf }
+            ' CHANGELOG.md > notes.md
+            if ! gh release view "v$v" > /dev/null 2>&1; then echo "v$v: no release yet, skipped"; continue; fi
+            current=$(gh release view "v$v" --json body --jq .body)
+            if [ "$current" = "$(cat notes.md)" ]; then echo "v$v: already up to date"; continue; fi
+            gh release edit "v$v" --notes-file notes.md > /dev/null && echo "v$v: notes updated"
+          done
