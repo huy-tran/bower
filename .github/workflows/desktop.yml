@@ -30,12 +30,39 @@ jobs:
       # Also downloads ffmpeg and Puppeteer's Chrome (into .cache/puppeteer).
       - run: npm ci
 
+      # The release notes are this version's section of CHANGELOG.md ("## 0.6.0 ..." up to the next "## ").
+      # No section, no release: better than a release page (and update dialog) with nothing to say.
+      - name: Release notes
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          # Wrapped continuation lines (starting with two spaces) are joined onto their bullet: GitHub shows every
+          # line break in a release body as a hard break.
+          awk -v v="$v" '
+            index($0, "## " v " ") == 1 || $0 == "## " v { on = 1; next }
+            /^## / && on { exit }
+            on && /^  [^ ]/ { sub(/^ +/, ""); buf = buf " " $0; next }
+            on { if (started) print buf; buf = $0; started = 1 }
+            END { if (started) print buf }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::error::CHANGELOG.md has no '## $v' section. Add one and tag again."
+            exit 1
+          fi
+          cat release-notes.md
+
       # electron-builder uploads several files at once and, with no release yet, can race into
       # creating two drafts for the same tag. Creating the draft first gives them one to share.
       - name: Create draft release
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         shell: bash
-        run: gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --title "${GITHUB_REF_NAME#v}" --notes ""
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --title "${GITHUB_REF_NAME#v}" --notes-file release-notes.md
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

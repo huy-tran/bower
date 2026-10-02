@@ -37,7 +37,7 @@ npm run build:desktop   # installer in dist-desktop (Bower-Setup-<version>.exe o
 
 Bower is an internal tool for a Windows team, so `.github/workflows/desktop.yml` builds the Windows installer only. To release:
 
-1. Bump `version` in `package.json` and commit.
+1. Add a `## x.y.z (date)` section to `CHANGELOG.md` describing the changes for the people using Bower, bump `version` in `package.json`, and commit both. The release notes on GitHub and in the update dialog come from that section, and the release stops if it is missing.
 2. Tag it with the same version and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 3. CI builds the installer and publishes the GitHub release (it uploads to a draft first and publishes once every file is there). Installed apps check every hour and download the update in the background, then a dialog offers **Restart now** or **Later**. Later keeps a **Restart to update to vX.Y.Z** button in the header, and the update also installs the next time Bower quits.
 

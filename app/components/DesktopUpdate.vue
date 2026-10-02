@@ -52,6 +52,11 @@ function install() {
             <p class="text-muted">Restarting stops any render or Claude reply in progress. Choose Later to finish those first; the update also installs the next time you quit Bower.</p>
           </div>
         </div>
+        <div v-if="update!.notes" class="mt-4 border-t border-default pt-3">
+          <p class="mb-2 text-sm font-semibold text-highlighted">What’s new</p>
+          <!-- Plain text from the release notes (electron/main.mjs strips the markup). -->
+          <p class="max-h-72 overflow-y-auto text-sm whitespace-pre-line text-default">{{ update!.notes }}</p>
+        </div>
       </template>
       <template #footer>
         <UButton color="neutral" variant="ghost" label="Later" :disabled="installing" @click="later" />

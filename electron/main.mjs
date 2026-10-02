@@ -212,8 +212,20 @@ ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
 // Updates come from the GitHub releases (electron-builder.yml, publish). A new version downloads in
 // the background; a dialog then offers to restart into it (app/components/DesktopUpdate.vue),
 // and otherwise it installs when Bower quits.
-let update = null // { version, state: 'downloading' | 'ready' }
+let update = null // { version, state: 'downloading' | 'ready', notes }
 const sendUpdate = () => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('bower:update', update))
+
+// The release notes arrive as the GitHub release page's HTML (from CHANGELOG.md, see the release workflow). The
+// dialog shows them as plain text: no markup from outside reaches the window.
+function notesText(raw) {
+  const html = Array.isArray(raw) ? raw.map(n => n.note || '').join('\n') : String(raw || '')
+  return html
+    .replace(/<li[^>]*>/gi, '\n- ').replace(/<\/(p|h\d|ul|ol|div)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<h\d[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, '\'').replace(/&nbsp;/g, ' ')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n\s*\n- /g, '\n- ').replace(/\n{3,}/g, '\n\n').trim()
+    .slice(0, 6000)
+}
 
 function checkForUpdates() {
   const log = createWriteStream(join(app.getPath('logs'), 'updater.log'), { flags: 'a' })
@@ -223,8 +235,8 @@ function checkForUpdates() {
   // A copy with its own data folder (BOWER_USER_DATA, used for testing) shares the installed app's
   // ID, so installing on quit would replace the real installation. Such copies only install on click.
   autoUpdater.autoInstallOnAppQuit = !process.env.BOWER_USER_DATA
-  autoUpdater.on('update-available', (info) => { update = { version: info.version, state: 'downloading' }; sendUpdate() })
-  autoUpdater.on('update-downloaded', (info) => { update = { version: info.version, state: 'ready' }; sendUpdate() })
+  autoUpdater.on('update-available', (info) => { update = { version: info.version, state: 'downloading', notes: notesText(info.releaseNotes) }; sendUpdate() })
+  autoUpdater.on('update-downloaded', (info) => { update = { version: info.version, state: 'ready', notes: notesText(info.releaseNotes) }; sendUpdate() })
   autoUpdater.on('error', () => { if (update?.state === 'downloading') { update = null; sendUpdate() } })
   const check = () => { if (update?.state !== 'ready') autoUpdater.checkForUpdates().catch(e => write('error')(e?.message ?? e)) }
   check()

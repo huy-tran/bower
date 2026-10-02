@@ -1,6 +1,30 @@
 <script setup lang="ts">
-// About Bower: which version this is, when it was built, and the tools it uses on this computer.
+// About Bower: which version this is, when it was built, the tools it uses on this computer, and what's new.
+import changelog from '../../CHANGELOG.md?raw'
+
 const open = defineModel<boolean>('open', { default: false })
+
+// This version's section of CHANGELOG.md, as groups of bullets (bold lead-ins kept). Rendered as text, no HTML.
+interface NoteItem { lead: string, text: string }
+const whatsNew = computed(() => {
+  const version = useRuntimeConfig().public.version as string
+  const lines = changelog.split(/\r?\n/)
+  const start = lines.findIndex(l => l === `## ${version}` || l.startsWith(`## ${version} `))
+  if (start < 0) return null
+  const groups: { title: string, items: NoteItem[] }[] = []
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('## ')) break
+    if (line.startsWith('### ')) { groups.push({ title: line.slice(4).trim(), items: [] }); continue }
+    if (!groups.length) groups.push({ title: '', items: [] })
+    const g = groups[groups.length - 1]!
+    if (line.startsWith('- ')) {
+      const m = line.slice(2).match(/^\*\*(.+?)\*\*\s*(.*)$/)
+      g.items.push(m ? { lead: m[1]!, text: m[2]! } : { lead: '', text: line.slice(2) })
+    } else if (line.trim() && g.items.length) g.items[g.items.length - 1]!.text += ` ${line.trim()}`
+  }
+  return { version, groups: groups.filter(x => x.items.length) }
+})
+const showNew = ref(false)
 const toast = useToast()
 
 interface About { version: string, builtAt: string | null, commit: string | null, edition: string, platform: string, runtime: string, chrome: string | null, ffmpeg: string | null, claude: { version: string | null, path: string } | null, dataFolder: string }
@@ -54,6 +78,20 @@ function copyAll() {
         </template>
       </dl>
       <USkeleton v-else class="mt-5 h-48 w-full" />
+      <div v-if="whatsNew" class="mt-5 border-t border-default pt-4">
+        <button type="button" class="flex w-full items-center justify-between text-left" @click="showNew = !showNew">
+          <span class="font-semibold text-highlighted">What’s new in {{ whatsNew.version }}</span>
+          <UIcon :name="showNew ? 'i-heroicons-chevron-up' : 'i-heroicons-chevron-down'" class="size-4 text-muted" />
+        </button>
+        <div v-if="showNew" class="mt-3 max-h-80 space-y-3 overflow-y-auto pr-1 text-sm">
+          <div v-for="g in whatsNew.groups" :key="g.title">
+            <p v-if="g.title" class="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">{{ g.title }}</p>
+            <ul class="list-disc space-y-1.5 pl-5">
+              <li v-for="(it, i) in g.items" :key="i"><span v-if="it.lead" class="font-medium text-highlighted">{{ it.lead }} </span><span class="text-default">{{ it.text }}</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </template>
     <template #footer>
       <div class="flex gap-2">

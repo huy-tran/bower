@@ -2,6 +2,8 @@
 export interface DesktopUpdateInfo {
   version: string
   state: 'downloading' | 'ready'
+  // This version's release notes, as plain text.
+  notes?: string
 }
 
 interface BowerDesktop {
