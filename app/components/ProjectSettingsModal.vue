@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Everything that is a setting of the open project, in one place. Fields save as you change them.
-export type SettingsTab = 'general' | 'art' | 'brand' | 'codebase' | 'app' | 'sound'
+export type SettingsTab = 'general' | 'art' | 'brand' | 'codebase' | 'app' | 'shots' | 'sound'
 
 const open = defineModel<boolean>('open', { default: false })
 const tab = defineModel<SettingsTab>('tab', { default: 'general' })
@@ -11,15 +11,16 @@ const narration = useNarration()
 const folders = useFolders()
 const toast = useToast()
 
-const tabs = [
+const tabs = computed(() => [
   { label: 'General', value: 'general', icon: 'i-heroicons-adjustments-horizontal', description: 'Name, stage and how Claude works on this project.' },
   { label: 'Art direction', value: 'art', icon: 'i-heroicons-paint-brush', description: 'Project-wide style guidance included in every prompt to Claude.' },
   { label: 'Brand kit', value: 'brand', icon: 'i-heroicons-swatch', description: 'Colours, fonts and logos shared across projects. Claude follows the kit this project uses.' },
   { label: 'Codebase', value: 'codebase', icon: 'i-heroicons-code-bracket', description: 'Repositories on this machine that Claude may read (never edit) so scenes can copy the product\'s real screens, components, data, colours and copy. Link each repo separately, for example the API and the frontend.' },
   { label: 'App', value: 'app', icon: 'i-heroicons-window', description: 'The running product. Sign in once, then you and Claude can take screenshots of its real screens for scenes.' },
+  { label: 'Screenshots', value: 'shots', icon: 'i-heroicons-camera', disabled: !project.value?.app, description: 'Real screens of the running product. Capture them here, or Claude takes its own while it builds scenes.' },
   { label: 'Sound', value: 'sound', icon: 'i-heroicons-speaker-wave', description: 'The narrator for generated voice-over, and how captions appear in the video.' }
-]
-const current = computed(() => tabs.find(t => t.value === tab.value) ?? tabs[0]!)
+])
+const current = computed(() => tabs.value.find(t => t.value === tab.value) ?? tabs.value[0]!)
 
 // Local drafts so typing feels instant; each is written back shortly after the last change.
 const draft = reactive({
@@ -93,7 +94,7 @@ async function loadShots() {
   shots.value = await $fetch(`/api/projects/${project.value.id}/app/shots`).catch(() => [])
   loginOpen.value = (await $fetch<{ open: boolean }>(`/api/projects/${project.value.id}/app/login`).catch(() => ({ open: false }))).open
 }
-watch([tab, open], ([t, o]) => { if (o && t === 'app') loadShots() }, { immediate: true })
+watch([tab, open], ([t, o]) => { if (o && (t === 'app' || t === 'shots')) loadShots() }, { immediate: true })
 async function openLogin() {
   try {
     await $fetch(`/api/projects/${project.value!.id}/app/login`, { method: 'POST', body: { target: capture.target } })
@@ -364,7 +365,12 @@ function download(format: 'srt' | 'vtt') {
                 <UButton v-else color="neutral" variant="soft" icon="i-heroicons-x-mark" label="Close window" @click="closeLogin" />
               </div>
             </UCard>
+          </div>
 
+          <!-- Screenshots -->
+          <div v-else-if="tab === 'shots'" class="space-y-5">
+            <UAlert v-if="!appLinked" color="neutral" variant="soft" icon="i-heroicons-information-circle" title="Set the app address first" description="Screenshots are taken from the running product. Add its address in the App tab." :actions="[{ label: 'Go to App', color: 'neutral', variant: 'outline', onClick: () => { tab = 'app' } }]" />
+            <UAlert v-else-if="loginOpen" color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" title="The sign-in window is open" description="Chrome cannot use the session twice at once. Close it to capture." :actions="[{ label: 'Close window', color: 'warning', variant: 'outline', onClick: closeLogin }]" />
             <UCard :ui="{ body: 'p-4 sm:p-4 space-y-3' }">
               <h3 class="font-semibold text-highlighted">Take a screenshot</h3>
               <div class="grid grid-cols-[1fr_11rem] gap-2">
@@ -382,7 +388,6 @@ function download(format: 'srt' | 'vtt') {
                 <USwitch v-model="capture.fullPage" label="Whole page, not just the first screen" size="sm" />
                 <UButton icon="i-heroicons-camera" label="Capture" :loading="capture.busy" :disabled="!appLinked || loginOpen" @click="takeShot" />
               </div>
-              <p v-if="loginOpen" class="text-xs text-warning">Close the sign-in window before capturing.</p>
               <p class="text-xs text-muted">Steps drive the page first: click, type, select, wait, scroll, hover, press, goto, and shot to save a PNG along the way. Claude can take its own with <code>node bower.mjs shot &lt;page&gt;</code> while it works on a scene.</p>
             </UCard>
 
