@@ -238,37 +238,41 @@ const formatLabel = computed(() => {
 })
 
 // Bower itself, for every project on this computer.
-const bowerMenu = computed<DropdownMenuItem[][]>(() => [[
-  { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show('claude') },
-  { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
-  { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
-], [
-  { label: 'About Bower', icon: 'i-heroicons-information-circle', onSelect: () => (aboutOpen.value = true) }
-]])
-
-const projectMenu = computed<DropdownMenuItem[][]>(() => {
-  const has = !!project.value
+// The Bower menu on the logo: projects (new, import), actions on the open project under its name, then Bower
+// itself. Storyboard and Settings keep their own toolbar buttons.
+const bowerMenu = computed<DropdownMenuItem[][]>(() => {
+  const p = project.value
   const formats = ['16:9', '9:16', '1:1', '4:5'].filter(f => f !== formatLabel.value)
-  return [[
-    { label: 'Storyboard…', icon: 'i-heroicons-clipboard-document-list', disabled: !has, onSelect: () => (storyOpen.value = true) },
-    { label: 'History…', icon: 'i-heroicons-clock', disabled: !has, onSelect: () => (historyOpen.value = true) },
-    { label: 'Project settings…', icon: 'i-heroicons-cog-6-tooth', disabled: !has, onSelect: () => openSettings() },
-    { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', disabled: !has, onSelect: duplicateProject },
-    {
-      label: 'New version for social…', icon: 'i-heroicons-device-phone-mobile', disabled: !has,
-      children: [formats.map(f => ({
-        label: { '16:9': 'Landscape 16:9', '9:16': 'Vertical 9:16 (Reels, TikTok, Shorts)', '1:1': 'Square 1:1', '4:5': 'Portrait 4:5 (feed)' }[f]!,
-        onSelect: () => adapt(f)
-      }))]
-    }
-  ], [
-    { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', disabled: !has, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/export` } },
-    { label: 'Import project…', icon: 'i-heroicons-arrow-up-tray', onSelect: () => importInput.value?.click() },
-    { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', disabled: !has, onSelect: () => { window.location.href = `/api/projects/${project.value!.id}/player?download=1` } },
-    { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', disabled: !has, onSelect: () => { window.open(`/api/projects/${project.value!.id}/player`, '_blank') } }
-  ], [
-    { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', disabled: !has, onSelect: () => (deleteOpen.value = true) }
+  const groups: DropdownMenuItem[][] = [[
+    { label: 'New project…', icon: 'i-heroicons-plus', onSelect: openNew },
+    { label: 'Import project…', icon: 'i-heroicons-arrow-up-tray', onSelect: () => importInput.value?.click() }
   ]]
+  if (p) {
+    groups.push([
+      { label: p.name, type: 'label' },
+      { label: 'History…', icon: 'i-heroicons-clock', onSelect: () => (historyOpen.value = true) },
+      { label: 'Duplicate project', icon: 'i-heroicons-document-duplicate', onSelect: duplicateProject },
+      {
+        label: 'New version for social…', icon: 'i-heroicons-device-phone-mobile',
+        children: [formats.map(f => ({
+          label: { '16:9': 'Landscape 16:9', '9:16': 'Vertical 9:16 (Reels, TikTok, Shorts)', '1:1': 'Square 1:1', '4:5': 'Portrait 4:5 (feed)' }[f]!,
+          onSelect: () => adapt(f)
+        }))]
+      },
+      { label: 'Export project (.zip)', icon: 'i-heroicons-archive-box-arrow-down', onSelect: () => { window.location.href = `/api/projects/${p.id}/export` } },
+      { label: 'Download web player (.html)', icon: 'i-heroicons-globe-alt', onSelect: () => { window.location.href = `/api/projects/${p.id}/player?download=1` } },
+      { label: 'Preview web player', icon: 'i-heroicons-arrow-top-right-on-square', onSelect: () => { window.open(`/api/projects/${p.id}/player`, '_blank') } },
+      { label: 'Delete project', icon: 'i-heroicons-trash', color: 'error', onSelect: () => (deleteOpen.value = true) }
+    ])
+  }
+  groups.push([
+    { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show('claude') },
+    { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
+    { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
+  ], [
+    { label: 'About Bower', icon: 'i-heroicons-information-circle', onSelect: () => (aboutOpen.value = true) }
+  ])
+  return groups
 })
 
 async function importProject(e: Event) {
@@ -320,10 +324,6 @@ async function copyPath() {
         </UDropdownMenu>
         <ProjectPicker @new="openNew" />
         <UBadge v-if="project" color="neutral" variant="soft" :label="formatLabel" />
-        <UButton color="neutral" variant="outline" icon="i-heroicons-plus" label="New project" @click="openNew" />
-        <UDropdownMenu :items="projectMenu" :content="{ align: 'start' }">
-          <UButton color="neutral" variant="ghost" icon="i-heroicons-ellipsis-horizontal" aria-label="Project actions" />
-        </UDropdownMenu>
         <input ref="importInput" type="file" accept=".zip,application/zip" class="hidden" @change="importProject">
         <UTabs v-model="mainTab" :items="mainTabs" :content="false" color="neutral" class="w-auto" />
         <div class="ml-auto flex items-center gap-2">
