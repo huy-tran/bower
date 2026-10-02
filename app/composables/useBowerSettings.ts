@@ -1,5 +1,5 @@
 // Opens Bower's own settings (this computer, every project) from anywhere: the header, the setup chip, links.
-export type BowerSettingsTab = 'claude' | 'defaults' | 'apps'
+export type BowerSettingsTab = 'claude' | 'defaults' | 'apps' | 'appearance'
 
 const open = ref(false)
 const tab = ref<BowerSettingsTab>('claude')

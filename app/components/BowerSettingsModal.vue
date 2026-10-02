@@ -10,7 +10,14 @@ const ed = useEditor()
 const tabs = [
   { label: 'Claude Code', value: 'claude', icon: 'i-heroicons-sparkles', description: 'Bower builds scenes with Claude Code on this computer.' },
   { label: 'New projects', value: 'defaults', icon: 'i-heroicons-document-plus', description: 'What new projects start with, and the model chats use unless one is picked. Existing projects keep their own settings.' },
-  { label: 'Apps', value: 'apps', icon: 'i-heroicons-window', description: 'The products your videos are about. Each is set up once (address, notes, code, sign-in) and shared by every project that picks it.' }
+  { label: 'Apps', value: 'apps', icon: 'i-heroicons-window', description: 'The products your videos are about. Each is set up once (address, notes, code, sign-in) and shared by every project that picks it.' },
+  { label: 'Appearance', value: 'appearance', icon: 'i-heroicons-swatch', description: 'How Bower looks on this computer. Your videos are not affected.' }
+]
+const colorMode = useColorMode()
+const themeItems = [
+  { label: 'Light', value: 'light' },
+  { label: 'Dark', value: 'dark' },
+  { label: 'Match system', description: 'Follow the light or dark setting of this computer.', value: 'system' }
 ]
 const current = computed(() => tabs.find(t => t.value === tab.value) ?? tabs[0]!)
 
@@ -121,6 +128,12 @@ async function addApp() {
           </div>
 
           <ClaudeCodeSetup v-if="tab === 'claude'" />
+
+          <div v-else-if="tab === 'appearance'" class="space-y-5">
+            <UFormField label="Theme">
+              <URadioGroup :model-value="colorMode.preference" :items="themeItems" @update:model-value="v => (colorMode.preference = String(v))" />
+            </UFormField>
+          </div>
 
           <div v-else-if="tab === 'defaults'" class="space-y-5">
             <UFormField label="Model for chats" help="Used when a message does not pick one. The picker in each chat still overrides it for that message.">

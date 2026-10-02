@@ -239,6 +239,13 @@ const formatLabel = computed(() => {
 // Bower itself, for every project on this computer.
 // The Bower menu on the logo: choosing a project (new, import, recent, all), then Bower itself.
 const allProjectsOpen = ref(false)
+// Light, dark or the system's choice, remembered in this browser (Bower settings, Appearance, has the same switch).
+const colorMode = useColorMode()
+const THEMES = [
+  { label: 'Light', value: 'light', icon: 'i-heroicons-sun' },
+  { label: 'Dark', value: 'dark', icon: 'i-heroicons-moon' },
+  { label: 'Match system', value: 'system', icon: 'i-heroicons-computer-desktop' }
+]
 const bowerMenu = computed<DropdownMenuItem[][]>(() => {
   const names = new Map(projects.value.map(p => [p.id, p]))
   const recent = ed.recentIds.value.filter(id => id !== project.value?.id && names.has(id)).slice(0, 6)
@@ -252,6 +259,10 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => {
     },
     { label: 'All projects…', icon: 'i-heroicons-squares-2x2', onSelect: () => (allProjectsOpen.value = true) }
   ], [
+    {
+      label: 'Theme', icon: colorMode.value === 'dark' ? 'i-heroicons-moon' : 'i-heroicons-sun',
+      children: [THEMES.map(t => ({ label: t.label, icon: t.icon, type: 'checkbox' as const, checked: colorMode.preference === t.value, onUpdateChecked: () => { colorMode.preference = t.value } }))]
+    },
     { label: 'Bower settings…', icon: 'i-heroicons-adjustments-horizontal', onSelect: () => bower.show('claude') },
     { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
     { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
@@ -380,7 +391,7 @@ async function copyProjectPath() {
             <UButton color="warning" variant="soft" icon="i-heroicons-exclamation-triangle" label="Set up Claude Code" @click="bower.show('claude')" />
           </UTooltip>
           <UTooltip v-else-if="project && setup.done.value < setup.total.value" text="Finish setting up this project so videos look like your real product">
-            <UButton color="primary" variant="soft" icon="i-heroicons-rocket-launch" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
+            <UButton color="neutral" variant="outline" icon="i-heroicons-rocket-launch" :ui="{ leadingIcon: 'text-primary' }" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
           </UTooltip>
           <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
             <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />
@@ -388,10 +399,11 @@ async function copyProjectPath() {
           <UTooltip text="This project: name, art direction, brand kit, app, code, narrator and captions">
             <UButton color="neutral" variant="outline" icon="i-heroicons-cog-6-tooth" label="Settings" :disabled="!project" @click="openSettings()" />
           </UTooltip>
-          <UButton v-if="mainTab === 'scenes'" color="neutral" variant="outline" icon="i-heroicons-film" label="Render" :disabled="!project" @click="mainTab = 'render'" />
+          <UButton color="neutral" variant="outline" icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
+          <!-- Making the video is where the work leads, so Render is the one coloured button. In the render view the
+               panel's own render button is the main action, so Back to scenes stays plain. -->
+          <UButton v-if="mainTab === 'scenes'" color="primary" icon="i-heroicons-film" label="Render" :disabled="!project" @click="mainTab = 'render'" />
           <UButton v-else color="neutral" variant="outline" icon="i-heroicons-arrow-left" label="Back to scenes" @click="mainTab = 'scenes'" />
-          <UColorModeButton />
-          <UButton icon="i-heroicons-arrows-pointing-out" label="Present" :disabled="!project" @click="presenting = true" />
         </div>
       </header>
 
