@@ -3,6 +3,18 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.6.0 (not released yet)
+
+### New
+- **Command palette.** Press Ctrl+K anywhere to search and run actions, jump to a scene, open another project or a
+  settings tab, or switch the theme.
+- **What's new.** The update dialog lists what changed in the new version, and About shows the notes for the version
+  you have.
+
+### Improved
+- The desktop app has no menu bar or Windows title bar any more: Bower's own top strip takes their place, with the
+  window buttons drawn in Bower's colours (light or dark). Drag the strip or the toolbar to move the window.
+
 ## 0.5.0 (2 October 2026)
 
 ### New
