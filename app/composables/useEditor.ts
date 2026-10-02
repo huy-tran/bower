@@ -13,6 +13,7 @@ export interface SceneView {
   transition: Transition | null
   voice: { text: string, voice?: string, speed?: number } | null
   brief: string
+  app: 'shots' | 'rebuild' | 'auto' | null
 }
 
 export interface Section { start: number, end: number, label: string, energy: number }
@@ -63,7 +64,7 @@ export interface ProjectView {
   brandKitId: string | null
   visualChecks: boolean
   codebases: { label: string, path: string, notes: string }[]
-  app: { url: string, notes: string } | null
+  app: { url: string, notes: string, mode?: 'shots' | 'rebuild' | 'auto' } | null
   narrator: { voice: string, speed: number, shortlist: string[], pronunciations: { term: string, sayAs: string }[] }
   folder: string
   versions: Record<string, number>

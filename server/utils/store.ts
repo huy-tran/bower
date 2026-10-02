@@ -82,7 +82,11 @@ export function normalizeFolder(v: unknown) {
 
 // A local repository Claude may read (via `claude --add-dir`), e.g. { label: 'API', path: 'C:\\Users\\me\\Herd\\acme-api' }.
 export interface Codebase { label: string, path: string, notes: string }
-export interface ProductApp { url: string, notes: string }
+// How Claude shows the app in scenes: real screenshots placed as images, screens rebuilt in HTML, or its own call.
+// Projects that linked an app before this setting existed have no mode, which means "auto".
+export type AppMode = 'shots' | 'rebuild' | 'auto'
+export const APP_MODES: AppMode[] = ['shots', 'rebuild', 'auto']
+export interface ProductApp { url: string, notes: string, mode?: AppMode }
 
 export interface SceneView {
   id: string
@@ -96,6 +100,8 @@ export interface SceneView {
   voice: SceneVoice | null
   // What the scene should show, from the storyboard ("brief" in the meta block).
   brief: string
+  // This scene's override of the project's app mode ("app" in the meta block), or null for the project default.
+  app: AppMode | null
 }
 
 export interface Version { n: number, at: string, label: string }
@@ -204,22 +210,30 @@ function parseVoice(v: unknown): SceneVoice | null {
   return out
 }
 
-export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string } {
+export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string, app: AppMode | null } {
   const m = html.match(META_RE)
   try {
     const d = m ? JSON.parse(m[1]!) : {}
-    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000) }
+    const app = APP_MODES.includes(d.app) ? d.app as AppMode : null
+    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000), app }
   } catch {
-    return { duration: 3000, voice: null, brief: '' }
+    return { duration: 3000, voice: null, brief: '', app: null }
   }
 }
 
-export function withDuration(html: string, duration: number) {
+// Sets keys in the meta block, keeping the others; a null value removes the key.
+export function withMeta(html: string, patch: Record<string, unknown>) {
   const m = html.match(META_RE)
   let rest: Record<string, unknown> = {}
   try { rest = m ? JSON.parse(m[1]!) : {} } catch {}
-  const meta = `<script type="application/json" id="meta">${JSON.stringify({ ...rest, duration: Math.round(duration) })}</script>`
+  const next = { ...rest, ...patch }
+  for (const k of Object.keys(next)) if (next[k] === null || next[k] === undefined) delete next[k]
+  const meta = `<script type="application/json" id="meta">${JSON.stringify(next)}</script>`
   return m ? html.replace(META_RE, meta) : `${meta}\n${html}`
+}
+
+export function withDuration(html: string, duration: number) {
+  return withMeta(html, { duration: Math.round(duration) })
 }
 
 export async function readScene(pid: string, sid: string) {
@@ -236,14 +250,14 @@ export async function sceneViews(p: Project): Promise<SceneView[]> {
   const out: SceneView[] = []
   for (const s of p.scenes) {
     const path = sceneFile(p.id, s.id)
-    let duration = 3000, mtime = 0, voice: SceneVoice | null = null, brief = ''
+    let duration = 3000, mtime = 0, voice: SceneVoice | null = null, brief = '', app: AppMode | null = null
     try {
       const [html, stat] = await Promise.all([fs.readFile(path, 'utf8'), fs.stat(path)])
-      ;({ duration, voice, brief } = sceneMeta(html))
+      ;({ duration, voice, brief, app } = sceneMeta(html))
       mtime = stat.mtimeMs
     } catch {}
     const transition = out.length && s.transition && s.transition.type !== 'cut' ? s.transition : null
-    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime, transition, voice, brief })
+    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime, transition, voice, brief, app })
     start += duration
   }
   return out

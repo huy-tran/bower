@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { addVersion, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneFile, sceneViews, writeScene, type Project } from './store'
+import { addVersion, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneFile, sceneViews, writeScene, type AppMode, type Project, type SceneView } from './store'
 
 export interface ChatJob {
   status: 'running' | 'done' | 'error'
@@ -48,8 +48,15 @@ function voiceLine(p: Project, s: { id: string, voice: { text: string } | null }
   return `Voice-over script (the "voice" key in the meta block): "${s.voice.text}". ${state}`
 }
 
-const appLine = (p: Project) => p.app
-  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md), Read them, and use them as references or place them in scenes. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms.`
+// How to show the app: the scene's own setting, else the project's. Spelled out every time, because users
+// rarely say it in the request.
+const APP_MODE_LINES: Record<AppMode, string> = {
+  shots: 'Show the real app, not a rebuilt one: place screenshots in the scene with <img> and animate them with crops, zooms, pans and crossfades. Capture every state you need (several per run, with steps) rather than redrawing any part of the UI in HTML. Only rebuild an element when a screenshot cannot do it, and say so.',
+  rebuild: 'Rebuild the app\'s screens in HTML/SVG inside the scene so their parts can animate separately. Use screenshots and the linked code as references for layout, colours, copy and iconography, but do not place screenshots in the scene.',
+  auto: 'Choose: real screenshots placed in the scene are more authentic, rebuilt screens are better when parts must animate separately.'
+}
+const appLine = (p: Project, s?: SceneView) => p.app
+  ? `The product is running at ${p.app.url}. Take screenshots of its real screens with \`node bower.mjs shot <page path> [desktop|laptop|tablet|mobile] [full] [steps]\` (see "The running product" in CLAUDE.md) and Read them. Steps (a JSON array of click, type, select, wait, scroll, hover, shot...) drive the page first, so you can capture real modals, menus and filled forms. ${APP_MODE_LINES[s?.app ?? p.app.mode ?? 'auto']}${s?.app ? ' (This scene sets this in the "app" key of its meta block; keep the key.)' : ''} An explicit instruction in the request overrides this.`
   : ''
 
 const codebaseLine = (p: Project) => p.codebases.length
@@ -74,7 +81,7 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
     b.sections.length ? `Music sections in this scene: ${b.sections.map(x => `${x.label} ${x.start}-${x.end}ms`).join(', ')} (VE.sections).` : '',
     voiceLine(p, s),
     s.brief ? `Storyboard brief for this scene (the "brief" key in the meta block): "${s.brief}". Keep the key; update it only if the user changes what the scene is about.` : '',
-    appLine(p),
+    appLine(p, s),
     opts.at !== undefined ? `The user's playhead is at ${Math.round(opts.at)}ms in this scene; "here" or "this moment" means that time.` : '',
     codebaseLine(p),
     '',

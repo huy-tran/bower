@@ -27,7 +27,7 @@ const draft = reactive({
   visualChecks: true,
   artDirection: '',
   repos: [] as { label: string, path: string, notes: string }[],
-  app: { url: '', notes: '' },
+  app: { url: '', notes: '', mode: 'shots' as 'shots' | 'rebuild' | 'auto' },
   narrator: { voice: 'af_heart', speed: 1 },
   pronunciations: [] as { term: string, sayAs: string }[],
   captions: { burnIn: false, position: 'bottom' as 'bottom' | 'top', size: 44 }
@@ -43,7 +43,7 @@ watch([open, project], ([o]) => {
   draft.visualChecks = p.visualChecks
   draft.artDirection = p.artDirection
   draft.repos = p.codebases.map(c => ({ ...c }))
-  draft.app = { url: p.app?.url ?? '', notes: p.app?.notes ?? '' }
+  draft.app = { url: p.app?.url ?? '', notes: p.app?.notes ?? '', mode: p.app?.mode ?? (p.app ? 'auto' : 'shots') }
   draft.narrator = { voice: p.narrator.voice, speed: p.narrator.speed }
   draft.pronunciations = p.narrator.pronunciations.map(x => ({ ...x }))
   draft.captions = { ...p.captions }
@@ -78,7 +78,12 @@ const saveCaptions = () => save({ captions: { ...draft.captions } })
 // The running product: address and notes autosave; a visible window handles sign-in; captures go to assets/shots.
 const chat = useChat()
 const appLinked = computed(() => !!project.value?.app)
-const saveApp = () => save({ app: draft.app.url.trim() ? { url: draft.app.url.trim(), notes: draft.app.notes } : null }, 600)
+const saveApp = () => save({ app: draft.app.url.trim() ? { url: draft.app.url.trim(), notes: draft.app.notes, mode: draft.app.mode } : null }, 600)
+const appModeItems = [
+  { label: 'Real screenshots', description: 'Claude captures the states it needs and animates them with crops, zooms and crossfades. Pixel-exact.', value: 'shots' },
+  { label: 'Rebuild in HTML', description: 'Claude redraws screens from screenshots and the code, so parts can animate separately.', value: 'rebuild' },
+  { label: 'Let Claude decide', description: 'Screenshots for authenticity, rebuilt screens when parts must move on their own.', value: 'auto' }
+]
 const loginOpen = ref(false)
 const shots = ref<{ name: string, path: string, url: string, at: string }[]>([])
 const capture = reactive({ target: '/', size: 'desktop', fullPage: false, steps: '', busy: false })
@@ -335,6 +340,9 @@ function download(format: 'srt' | 'vtt') {
             </UFormField>
             <UFormField label="Getting around" hint="Optional" help="Tell Claude how the app is laid out: key pages and their paths, demo account details, what to avoid.">
               <UTextarea v-model="draft.app.notes" :rows="3" autoresize class="w-full" placeholder="e.g. Dashboard at /dashboard, projects at /projects/1. Use the demo workspace. Avoid /admin." @update:model-value="saveApp" />
+            </UFormField>
+            <UFormField label="How Claude shows the app" help="A scene can override this from the picker in its chat. Saying it in a request always wins.">
+              <URadioGroup v-model="draft.app.mode" :items="appModeItems" :disabled="!draft.app.url.trim()" @update:model-value="saveApp" />
             </UFormField>
 
             <UCard :ui="{ body: 'p-4 sm:p-4 space-y-3' }">

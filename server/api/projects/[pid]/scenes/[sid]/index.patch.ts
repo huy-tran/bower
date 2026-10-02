@@ -1,14 +1,23 @@
+import { APP_MODES, withMeta, type AppMode } from '../../../../../utils/store'
+
 export default defineEventHandler(async (event) => {
   const p = await loadProject(getRouterParam(event, 'pid')!)
   const sid = assertId(getRouterParam(event, 'sid'))
   const s = p.scenes.find(x => x.id === sid)
   if (!s) throw createError({ statusCode: 404, message: 'Scene not found' })
-  const body = await readBody<{ title?: string, duration?: number, transition?: Transition | null }>(event)
+  const body = await readBody<{ title?: string, duration?: number, transition?: Transition | null, app?: AppMode | null }>(event)
   if (body.title?.trim()) s.title = body.title.trim()
   if (body.duration && body.duration >= 100) {
     const html = withDuration(await readScene(p.id, sid), body.duration)
     await writeScene(p.id, sid, html)
     await addVersion(p.id, sid, html, `Duration ${(body.duration / 1000).toFixed(2)}s`)
+  }
+  // How Claude shows the app in this scene; null goes back to the project setting. Lives in the meta block.
+  if (body.app !== undefined) {
+    const app = body.app && APP_MODES.includes(body.app) ? body.app : null
+    const html = withMeta(await readScene(p.id, sid), { app })
+    await writeScene(p.id, sid, html)
+    await addVersion(p.id, sid, html, app ? `App: ${app === 'shots' ? 'screenshots' : app === 'rebuild' ? 'rebuild' : 'auto'}` : 'App: project default')
   }
   // The transition into this scene from the previous one.
   if (body.transition !== undefined) {

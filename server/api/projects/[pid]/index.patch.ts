@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { basename, resolve } from 'node:path'
-import type { AudioInfo, CaptionSettings, Clip, Codebase } from '../../../utils/store'
+import { APP_MODES, type AppMode, type AudioInfo, type CaptionSettings, type Clip, type Codebase } from '../../../utils/store'
 
 const nums = (l: unknown) => Array.isArray(l) ? l.map(Number).filter(Number.isFinite) : undefined
 const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {
@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
     brandKitId?: string | null
     visualChecks?: boolean
     codebases?: Partial<Codebase>[]
-    app?: { url?: string, notes?: string } | null
+    app?: { url?: string, notes?: string, mode?: AppMode } | null
     narrator?: { voice?: string, speed?: number, shortlist?: string[], pronunciations?: { term?: string, sayAs?: string }[] }
     folder?: string
   }>(event)
@@ -33,7 +33,9 @@ export default defineEventHandler(async (event) => {
       let parsed: URL
       try { parsed = new URL(url) } catch { throw createError({ statusCode: 422, message: 'The app address must be a full URL, like http://localhost:8000' }) }
       if (!/^https?:$/.test(parsed.protocol)) throw createError({ statusCode: 422, message: 'The app address must start with http:// or https://' })
-      p.app = { url: parsed.toString().replace(/\/$/, ''), notes: String(body.app?.notes ?? p.app?.notes ?? '').slice(0, 2000) }
+      // A newly linked app defaults to real screenshots; one linked before the setting existed stays on "auto".
+      const mode = APP_MODES.includes(body.app?.mode as AppMode) ? body.app!.mode! : p.app?.mode ?? (p.app ? 'auto' : 'shots')
+      p.app = { url: parsed.toString().replace(/\/$/, ''), notes: String(body.app?.notes ?? p.app?.notes ?? '').slice(0, 2000), mode }
     }
   }
 

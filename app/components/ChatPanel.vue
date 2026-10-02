@@ -41,6 +41,21 @@ const model = ref('default')
 try { model.value = localStorage.getItem('bower:model') || 'default' } catch {}
 watch(model, (m) => { try { localStorage.setItem('bower:model', m) } catch {} })
 
+// How Claude shows the app in this scene (saved in the scene's meta block); empty means the project setting.
+const APP_MODES = [
+  { label: 'App: project default', value: 'default', description: 'Follow the setting in Settings, App' },
+  { label: 'App: screenshots', value: 'shots', description: 'Place real screenshots, animate with crops and zooms' },
+  { label: 'App: rebuild', value: 'rebuild', description: 'Redraw screens in HTML so parts animate separately' },
+  { label: 'App: Claude decides', value: 'auto', description: 'Whichever suits the request' }
+]
+const appMode = computed({
+  get: () => selected.value?.app ?? 'default',
+  set: async (v: string) => {
+    if (!project.value || !selected.value) return
+    setProject(await $fetch(`/api/projects/${project.value.id}/scenes/${selected.value.id}`, { method: 'PATCH', body: { app: v === 'default' ? null : v } }))
+  }
+})
+
 const key = computed(() => tab.value === 'project' ? 'project' : selected.value?.id ?? '')
 const pid = computed(() => project.value?.id ?? '')
 const current = computed(() => pid.value && key.value ? chat.thread(pid.value, key.value) : null)
@@ -398,6 +413,7 @@ function timeAgo(iso: string) {
               <UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-map-pin" :label="`${(sceneTime / 1000).toFixed(2)}s`" class="font-mono" :disabled="busy" @click="insertTime" />
             </UTooltip>
             <USelect v-model="model" :items="MODELS" size="sm" variant="ghost" class="w-32" :ui="{ content: 'min-w-56' }" aria-label="Model" />
+            <USelect v-if="tab === 'scene' && project?.app" v-model="appMode" :items="APP_MODES" size="sm" variant="ghost" class="w-40" :ui="{ content: 'min-w-64' }" aria-label="How Claude shows the app" :disabled="busy" />
           </div>
           <span v-if="dictation.listening.value" class="ml-2 flex items-center gap-1.5 truncate text-xs font-medium text-error">
             <span class="size-2 animate-pulse rounded-full bg-error" /> Listening
