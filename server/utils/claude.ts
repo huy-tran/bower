@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
+import { requireClaude, spawnClaude } from './claudeBin'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -172,6 +173,7 @@ function describeTool(p: Project, c: any) {
 export async function startChat(pid: string, key: string, message: string, opts: ChatOptions = {}) {
   const k = jobKey(pid, key)
   if (jobs.get(k)?.status === 'running') throw createError({ statusCode: 409, message: 'Claude is already working on this' })
+  const bin = await requireClaude()
 
   const project = await loadProject(pid)
   await saveProject(project) // refresh CLAUDE.md and bower.mjs with the latest settings
@@ -208,7 +210,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
   // Read/Glob/Grep are refused outside the working directory in -p mode; --add-dir is the supported way to widen it.
   for (const c of project.codebases) args.push('--add-dir', c.path)
 
-  const proc = spawn(process.env.CLAUDE_BIN || 'claude', args, {
+  const proc = spawnClaude(bin, args, {
     cwd: projectDir(pid),
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,

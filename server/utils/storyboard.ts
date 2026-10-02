@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { addVersion, blankScene, loadProject, newSceneId, projectDir, projectView, saveProject, sceneViews, writeScene } from './store'
 import { trashScene } from './trash'
@@ -31,6 +31,7 @@ function cleanPlan(raw: unknown): PlanScene[] {
 
 export async function startPlan(pid: string, brief: string, opts: { seconds?: number, narration?: boolean } = {}) {
   if (jobs.get(pid)?.status === 'running') return getPlan(pid)!
+  const bin = await requireClaude()
   const p = await loadProject(pid)
   const views = await sceneViews(p)
   // No target length: Claude sizes the video to the brief.
@@ -66,7 +67,7 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
   ]
   for (const c of p.codebases) args.push('--add-dir', c.path)
   if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
-  const proc = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+  const proc = spawnClaude(bin, args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   proc.stdin.end(prompt)
 
   let text = ''

@@ -101,9 +101,12 @@ interface SessionInfo { signedIn?: boolean, checkedAt?: string, reachable?: bool
 const session = ref<SessionInfo | null>(null)
 const checking = ref(false)
 const lastCheck = ref<{ reachable: boolean, signedIn: boolean | null, autoSignedIn?: boolean, error?: string, title?: string, loginOpen?: boolean } | null>(null)
+const setup = useSetup()
 async function loadSession() {
-  if (!project.value?.app) { session.value = null; return }
-  session.value = await $fetch<SessionInfo>(`/api/projects/${project.value.id}/app/session`).catch(() => null)
+  if (!project.value) return
+  session.value = project.value.app ? await $fetch<SessionInfo>(`/api/projects/${project.value.id}/app/session`).catch(() => null) : null
+  // The header's setup chip counts from the same state.
+  setup.setSession(project.value.id, session.value)
 }
 async function testConnection() {
   checking.value = true
@@ -385,7 +388,7 @@ function download(format: 'srt' | 'vtt') {
 
           <!-- General -->
           <div v-if="tab === 'general'" class="space-y-5">
-            <SetupChecklist :session="session" @go="t => (tab = t)" @test="() => { tab = 'app'; testConnection() }" />
+            <SetupChecklist @go="t => (tab = t)" @test="() => { tab = 'app'; testConnection() }" />
             <UFormField label="Name">
               <UInput v-model="draft.name" class="w-full" @update:model-value="saveName" />
             </UFormField>

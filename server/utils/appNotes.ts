@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { readSession } from './session'
 import { describeNetError, withProfile } from './shots'
@@ -70,6 +70,7 @@ export async function startNotes(pid: string) {
     if (!found.pages.length) throw new Error('Bower could not open any page of the app')
     if (found.pages.every(pg => /sign ?in|log ?in/i.test(pg.title))) throw new Error('Every page showed the sign-in screen. Sign in first (Open browser), then try again')
     job.activity.push('Claude is writing the notes…')
+    const bin = await requireClaude()
     const prompt = [
       'Below is what Bower found by walking the menus of a web app: each page\'s path, the menu label that leads there, its title,',
       'headings, buttons and table columns. Write short "getting around" notes for another AI that will capture screenshots of this',
@@ -85,7 +86,7 @@ export async function startNotes(pid: string) {
     const args = ['-p', '--output-format', 'stream-json', '--verbose', '--allowedTools', 'Read', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent,Glob,Grep']
     if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
     const text = await new Promise<string>((resolve, reject) => {
-      const proc = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+      const proc = spawnClaude(bin, args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       let out = '', isError = false, stderr = ''
       const timer = setTimeout(() => proc.kill(), TIMEOUT_MS)
       createInterface({ input: proc.stdout }).on('line', (line) => {

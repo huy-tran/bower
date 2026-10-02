@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { loadProject, saveProject } from './store'
 
@@ -36,6 +36,7 @@ export async function startScan(pid: string, path: string) {
   const p = await loadProject(pid)
   const repo = p.codebases.find(c => c.path.toLowerCase() === path.toLowerCase())
   if (!repo) throw createError({ statusCode: 404, message: 'That repository is not linked to this project' })
+  const bin = await requireClaude()
 
   const job: ScanJob = { status: 'running', startedAt: Date.now(), activity: ['Starting Claude…'] }
   jobs.set(k, job)
@@ -48,7 +49,7 @@ export async function startScan(pid: string, path: string) {
     '--add-dir', repo.path
   ]
   if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
-  const proc = spawn(process.env.CLAUDE_BIN || 'claude', args, { cwd: repo.path, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+  const proc = spawnClaude(bin, args, { cwd: repo.path, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   proc.stdin.end(PROMPT)
 
   let text = ''

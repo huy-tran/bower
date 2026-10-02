@@ -169,6 +169,11 @@ async function onDrop(e: DragEvent) {
   }
 }
 
+// Setup progress for the header chip; refreshed when the project changes or the settings close.
+const setup = useSetup()
+onMounted(() => setup.checkClaude())
+watch([() => project.value?.id, settingsOpen], ([id, open]) => { if (id && !open) setup.loadSession(id, !!project.value?.app) }, { immediate: true })
+
 function openSettings(tab: SettingsTab = 'general') {
   settingsTab.value = tab
   settingsOpen.value = true
@@ -331,6 +336,9 @@ async function copyPath() {
             </UTooltip>
           </UFieldGroup>
           <NarrationStatus />
+          <UTooltip v-if="project && setup.done.value < setup.total.value" :text="setup.blocked.value ? 'Claude Code needs attention before Claude can build scenes' : 'Finish setting up this project so videos look like your real product'">
+            <UButton :color="setup.blocked.value ? 'warning' : 'primary'" variant="soft" :icon="setup.blocked.value ? 'i-heroicons-exclamation-triangle' : 'i-heroicons-rocket-launch'" :label="`Setup ${setup.done.value}/${setup.total.value}`" @click="openSettings('general')" />
+          </UTooltip>
           <UTooltip text="Plan the video: Claude drafts the scenes from a brief">
             <UButton color="neutral" variant="outline" icon="i-heroicons-clipboard-document-list" label="Storyboard" :disabled="!project" @click="storyOpen = true" />
           </UTooltip>
