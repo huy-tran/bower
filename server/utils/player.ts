@@ -153,7 +153,9 @@ export async function buildPlayer(pid: string, opts: PlayerOptions = {}) {
   function fmt(ms) { var s = Math.max(0, ms) / 1000; return Math.floor(s / 60) + ':' + ('0' + (s % 60).toFixed(1)).slice(-4); }
 
   // Show the layers for time t and ask each visible scene to draw its frame. Resolves when all have painted.
-  function show() {
+  // Only __render waits on the result; every other caller uses show(), which ignores a scene that never answers
+  // (one still loading misses the seek), so its timeout cannot surface as an unhandled rejection mid-render.
+  function draw() {
     var layers = layersAt(SCENES, t);
     var visible = {};
     var waits = [];
@@ -205,7 +207,8 @@ export async function buildPlayer(pid: string, opts: PlayerOptions = {}) {
       show();
     }
   });
-  window.__render = function (ms) { t = ms; return show(); };
+  function show() { draw().catch(function () {}); }
+  window.__render = function (ms) { t = ms; return draw(); };
 
   function syncAudio() {
     if (music) {
