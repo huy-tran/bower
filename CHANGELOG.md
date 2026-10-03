@@ -3,6 +3,13 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.6.2 (3 October 2026)
+
+### New
+- **Check for updates.** In the desktop app, About, the Bower menu and the command palette can look for a new
+  version straight away instead of waiting for the hourly check. A new version downloads and then offers to restart
+  into it as usual.
+
 ## 0.6.1 (3 October 2026)
 
 ### Fixed
