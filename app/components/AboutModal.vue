@@ -26,6 +26,7 @@ const whatsNew = computed(() => {
 })
 const showNew = ref(false)
 const toast = useToast()
+const updates = useUpdateCheck()
 
 interface About { version: string, builtAt: string | null, commit: string | null, edition: string, platform: string, runtime: string, chrome: string | null, ffmpeg: string | null, claude: { version: string | null, path: string } | null, dataFolder: string }
 const about = ref<About | null>(null)
@@ -96,6 +97,7 @@ function copyAll() {
     <template #footer>
       <div class="flex gap-2">
         <UButton color="neutral" variant="ghost" icon="i-heroicons-clipboard-document-list" label="Copy details" :disabled="!about" @click="copyAll" />
+        <UButton v-if="updates.available.value" color="neutral" variant="ghost" icon="i-heroicons-arrow-path" label="Check for updates" :loading="updates.checking.value" @click="updates.check()" />
         <UButton color="neutral" variant="ghost" icon="i-heroicons-document-text" label="Release notes" trailing-icon="i-heroicons-arrow-top-right-on-square" to="https://github.com/huy-tran/bower/releases" target="_blank" />
       </div>
       <UButton color="neutral" label="Close" @click="open = false" />

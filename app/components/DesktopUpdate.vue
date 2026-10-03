@@ -19,6 +19,9 @@ function dismissed() {
 watch(update, (u) => {
   if (u?.state === 'ready' && dismissed() !== u.version) dialogOpen.value = true
 })
+// Check for updates found this version already downloaded: ask again even after a "Later".
+const { reopen } = useUpdateCheck()
+watch(reopen, () => { if (ready.value) dialogOpen.value = true })
 
 let stop: (() => void) | undefined
 onMounted(async () => {

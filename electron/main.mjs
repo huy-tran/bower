@@ -240,8 +240,9 @@ ipcMain.handle('bower:pick-folder', async (e, { title, initial } = {}) => {
 
 // Updates come from the GitHub releases (electron-builder.yml, publish). A new version downloads in
 // the background; a dialog then offers to restart into it (app/components/DesktopUpdate.vue),
-// and otherwise it installs when Bower quits.
+// and otherwise it installs when Bower quits. Check for updates (About, the Bower menu) checks at once.
 let update = null // { version, state: 'downloading' | 'ready', notes }
+let checkNow = null // set once the updater is running (packaged app only)
 const sendUpdate = () => BrowserWindow.getAllWindows().forEach(w => w.webContents.send('bower:update', update))
 
 // The release notes arrive as the GitHub release page's HTML (from CHANGELOG.md, see the release workflow). The
@@ -268,11 +269,25 @@ function checkForUpdates() {
   autoUpdater.on('update-downloaded', (info) => { update = { version: info.version, state: 'ready', notes: notesText(info.releaseNotes) }; sendUpdate() })
   autoUpdater.on('error', () => { if (update?.state === 'downloading') { update = null; sendUpdate() } })
   const check = () => { if (update?.state !== 'ready') autoUpdater.checkForUpdates().catch(e => write('error')(e?.message ?? e)) }
+  checkNow = async () => {
+    if (update?.state === 'ready') return { status: 'ready', version: update.version }
+    try {
+      const r = await autoUpdater.checkForUpdates()
+      return r?.isUpdateAvailable ? { status: 'downloading', version: r.updateInfo.version } : { status: 'latest', version: app.getVersion() }
+    } catch (e) {
+      write('error')(e?.message ?? e)
+      return { status: 'error', message: String(e?.message ?? e).split('\n')[0].slice(0, 300) }
+    }
+  }
   check()
   setInterval(check, 60 * 60 * 1000).unref()
 }
 
 ipcMain.handle('bower:update-state', e => fromApp(e) ? update : null)
+ipcMain.handle('bower:check-update', async (e) => {
+  if (!fromApp(e)) return null
+  return checkNow ? checkNow() : { status: 'unavailable' }
+})
 ipcMain.handle('bower:install-update', (e) => {
   if (!fromApp(e) || update?.state !== 'ready') return
   quitting = true

@@ -182,6 +182,7 @@ async function onDrop(e: DragEvent) {
 // Setup progress for the header chip; refreshed when the project changes or the settings close.
 const setup = useSetup()
 const bower = useBowerSettings()
+const updates = useUpdateCheck()
 // Leaving Bower settings may have changed the open project's app (renamed, moved): reload it.
 watch(bower.open, async (o) => { if (!o && project.value) { ed.setProject(await $fetch(`/api/projects/${project.value.id}`)); setup.checkClaude() } })
 onMounted(() => setup.checkClaude())
@@ -279,6 +280,7 @@ const bowerMenu = computed<DropdownMenuItem[][]>(() => {
     { label: 'Apps…', icon: 'i-heroicons-window', onSelect: () => bower.show('apps') },
     { label: 'Trash', icon: 'i-heroicons-archive-box', onSelect: () => (trashOpen.value = true) }
   ], [
+    ...(updates.available.value ? [{ label: 'Check for updates', icon: 'i-heroicons-arrow-path', onSelect: () => updates.check() }] : []),
     { label: 'About Bower', icon: 'i-heroicons-information-circle', onSelect: () => (aboutOpen.value = true) }
   ]]
 })
@@ -365,6 +367,7 @@ const paletteGroups = computed(() => {
       { id: 'bs-keys', label: 'Keyboard shortcuts', icon: 'i-heroicons-command-line', keywords: 'hotkeys keys', run: () => bower.show('keys') },
       ...THEMES.map(t => ({ id: `theme-${t.value}`, label: `Theme: ${t.label}`, icon: t.icon, keywords: 'dark light appearance', run: () => { colorMode.preference = t.value } })),
       { id: 'trash', label: 'Trash', icon: 'i-heroicons-archive-box', run: () => { trashOpen.value = true } },
+      ...(updates.available.value ? [{ id: 'check-update', label: 'Check for updates', icon: 'i-heroicons-arrow-path', keywords: 'update upgrade version', run: () => updates.check() }] : []),
       { id: 'about', label: 'About Bower', icon: 'i-heroicons-information-circle', keywords: 'version', run: () => { aboutOpen.value = true } }
     ]
   })
