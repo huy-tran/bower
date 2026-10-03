@@ -3,6 +3,12 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.6.1 (3 October 2026)
+
+### Fixed
+- Renders longer than about 20 seconds no longer fail with "A scene did not draw its frame within 20 seconds" when
+  every frame was actually drawn.
+
 ## 0.6.0 (2 October 2026)
 
 ### New
