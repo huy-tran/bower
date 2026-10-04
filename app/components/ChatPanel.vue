@@ -413,22 +413,23 @@ function timeAgo(iso: string) {
           </div>
         </template>
         <template #footer>
-          <div class="flex min-w-0 items-center gap-0.5">
+          <!-- Wraps onto a second row when the panel is narrow, so the pickers never run under the buttons on the right. -->
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
             <UTooltip text="Attach reference images (or drop / paste them)">
               <UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-paper-clip" aria-label="Attach images" :disabled="busy" @click="fileInput?.click()" />
             </UTooltip>
             <UTooltip v-if="tab === 'scene'" text="Point at the playhead time">
               <UButton size="sm" color="neutral" variant="ghost" icon="i-heroicons-map-pin" :label="`${(sceneTime / 1000).toFixed(2)}s`" class="font-mono" :disabled="busy" @click="insertTime" />
             </UTooltip>
-            <USelect v-model="model" :items="MODELS" size="sm" variant="ghost" class="w-32" :ui="{ content: 'min-w-56' }" aria-label="Model" />
-            <USelect v-if="tab === 'scene' && project?.app" v-model="appMode" :items="APP_MODES" size="sm" variant="ghost" class="w-40" :ui="{ content: 'min-w-64' }" aria-label="How Claude shows the app" :disabled="busy" />
+            <USelect v-model="model" :items="MODELS" size="sm" variant="ghost" class="w-32 max-w-full" :ui="{ content: 'min-w-56' }" aria-label="Model" />
+            <USelect v-if="tab === 'scene' && project?.app" v-model="appMode" :items="APP_MODES" size="sm" variant="ghost" class="w-40 max-w-full" :ui="{ content: 'min-w-64' }" aria-label="How Claude shows the app" :disabled="busy" />
           </div>
-          <span v-if="dictation.listening.value" class="ml-2 flex items-center gap-1.5 truncate text-xs font-medium text-error">
+          <span v-if="dictation.listening.value" class="ml-2 flex shrink-0 items-center gap-1.5 text-xs font-medium text-error">
             <span class="size-2 animate-pulse rounded-full bg-error" /> Listening
           </span>
           <UTooltip v-if="dictation.supported" :text="dictation.listening.value ? 'Stop dictation' : 'Dictate with your voice'">
             <UButton
-              class="ml-auto"
+              class="ml-auto shrink-0"
               :color="dictation.listening.value ? 'error' : 'neutral'"
               :variant="dictation.listening.value ? 'soft' : 'ghost'"
               :icon="dictation.listening.value ? 'i-heroicons-stop-circle' : 'i-heroicons-microphone'"
@@ -438,7 +439,7 @@ function timeAgo(iso: string) {
               @click="dictation.toggle(draft)"
             />
           </UTooltip>
-          <UChatPromptSubmit :class="!dictation.supported && 'ml-auto'" :status="busy ? 'streaming' : 'ready'" :disabled="!busy && !draft.trim()" @stop="chat.cancel(pid, key)" />
+          <UChatPromptSubmit class="shrink-0" :class="!dictation.supported && 'ml-auto'" :status="busy ? 'streaming' : 'ready'" :disabled="!busy && !draft.trim()" @stop="chat.cancel(pid, key)" />
         </template>
       </UChatPrompt>
       <p class="mt-1.5 flex items-center gap-1 text-xs text-dimmed">
