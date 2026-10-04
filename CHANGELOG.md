@@ -3,6 +3,12 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.6.4 (4 October 2026)
+
+### Fixed
+- In a window that is not full screen, the controls under the chat box (the model, how Claude shows the app, the
+  microphone) no longer overlap. They wrap onto a second line instead.
+
 ## 0.6.3 (4 October 2026)
 
 ### Improved
