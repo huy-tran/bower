@@ -3,6 +3,12 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.6.3 (4 October 2026)
+
+### Improved
+- **A new look for Bower.** A bowerbird logo in the header and About, a matching desktop app icon, and a new
+  browser tab icon.
+
 ## 0.6.2 (3 October 2026)
 
 ### New
