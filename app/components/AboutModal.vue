@@ -63,7 +63,7 @@ function copyAll() {
   <UModal v-model:open="open" title="About Bower" :ui="{ content: 'max-w-lg', footer: 'justify-between' }">
     <template #body>
       <div class="flex items-center gap-4">
-        <UAvatar icon="i-lucide-bird" size="xl" :ui="{ root: 'rounded-xl bg-inverted', icon: 'text-inverted' }" />
+        <BowerLogo class="size-10" />
         <div>
           <p class="text-xl font-semibold tracking-tight text-highlighted">Bower</p>
           <p class="text-sm text-muted">A prompt-driven motion graphics editor. Describe a scene, Claude builds it, and Bower renders it to video frame by frame.</p>

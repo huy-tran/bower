@@ -453,7 +453,7 @@ async function copyProjectPath() {
         <!-- The logo is the one place for things that are not about the open project. -->
         <UDropdownMenu :items="bowerMenu" :content="{ align: 'start' }">
           <button type="button" class="-my-1 flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary" aria-label="Bower menu">
-            <UAvatar icon="i-lucide-bird" size="sm" :ui="{ root: 'rounded-md bg-inverted', icon: 'text-inverted' }" />
+            <BowerLogo class="size-7" />
             <span class="flex items-center gap-1 text-lg leading-none font-semibold tracking-tight text-highlighted">Bower <UIcon name="i-heroicons-chevron-down" class="size-3.5 text-muted" /></span>
           </button>
         </UDropdownMenu>
