@@ -1,6 +1,7 @@
 import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { updateApp } from './apps'
+import { lightModel } from './models'
 import { allCodebases, loadProject, saveProject } from './store'
 
 // "Where to look" notes written by Claude itself: it reads a linked repository (read-only) and returns a short
@@ -48,9 +49,9 @@ export async function startScan(pid: string, path: string) {
     '-p', '--output-format', 'stream-json', '--verbose',
     '--allowedTools', 'Read,Glob,Grep',
     '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent',
-    '--add-dir', repo.path
+    '--add-dir', repo.path,
+    '--model', lightModel('sonnet')
   ]
-  if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
   const proc = spawnClaude(bin, args, { cwd: repo.path, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   proc.stdin.end(PROMPT)
 

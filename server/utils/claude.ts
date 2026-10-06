@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import { requireClaude, spawnClaude } from './claudeBin'
-import { readSettings } from './settings'
+import { pickModel } from './models'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -19,13 +19,17 @@ export interface ChatJob {
 export interface ChatOptions {
   origin?: string
   model?: string
+  // 'build' when Bower builds a whole scene (storyboard, reformatting); 'chat' for the user's own requests.
+  task?: 'chat' | 'build'
   attachments?: string[]
   at?: number
 }
 
 const jobs = new Map<string, ChatJob>()
 const TIMEOUT_MS = 15 * 60 * 1000
-const MODELS = ['opus', 'sonnet', 'haiku']
+// Every resumed request carries the whole session so far, so long chats get dearer with each message. After this
+// many requests the next one starts a fresh session with a short recap; the scene files hold the real state.
+const SESSION_TURNS = 8
 
 export const jobKey = (pid: string, key: string) => `${pid}:${key}`
 
@@ -88,13 +92,21 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
     codebaseLine(p),
     '',
     `Follow the scene contract in CLAUDE.md. Read \`${s.file}\` first. Only edit \`${s.file}\` unless the request clearly asks for changes to other scenes.`,
-    p.visualChecks ? `When you have made a visual change, check it with \`node bower.mjs snap ${s.id} <ms...>\` and Read the PNGs before replying.` : '',
+    p.visualChecks ? snapLine(`node bower.mjs snap ${s.id} <ms...>`, opts.task) : '',
     'Reply with a short plain-prose summary of what you changed (no markdown headings, no code).'
   ]
   return lines.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
-async function projectContext(p: Project) {
+// Every snapshot Claude reads is an image, which costs far more than text: full checks when building a scene,
+// and only where something could have moved out of place for smaller edits.
+function snapLine(cmd: string, task: ChatOptions['task']) {
+  return task === 'build'
+    ? `When the scene is built, check it with \`${cmd}\` and Read the PNGs before replying.`
+    : `If you changed layout, added or removed elements or changed motion, check the moments you changed with \`${cmd}\` and Read the PNGs before replying. Skip the check for small copy, colour or timing tweaks.`
+}
+
+async function projectContext(p: Project, opts: ChatOptions) {
   const views = await sceneViews(p)
   return [
     `You are working on the whole project "${p.name}" (${views.length} scenes, ${p.width}x${p.height} stage):`,
@@ -106,7 +118,7 @@ async function projectContext(p: Project) {
     '',
     'Follow the scene contract in CLAUDE.md.',
     'To add, remove, rename or reorder scenes, edit the `scenes` array in `project.json` (keep it valid JSON; ids are lowercase-kebab-case) and create or delete the matching `scenes/<id>.html` files. Do not change other keys in project.json.',
-    p.visualChecks ? 'Check visual changes with `node bower.mjs snap <sceneId> <ms...>` (and `node bower.mjs seam` for cuts) before replying.' : '',
+    p.visualChecks ? `${snapLine('node bower.mjs snap <sceneId> <ms...>', opts.task)} Use \`node bower.mjs seam\` for cuts.` : '',
     'Reply with a short plain-prose summary of what you changed (no markdown headings, no code).'
   ].join('\n')
 }
@@ -185,17 +197,23 @@ export async function startChat(pid: string, key: string, message: string, opts:
   const project = await loadProject(pid)
   await saveProject(project) // refresh CLAUDE.md and bower.mjs with the latest settings
   const attachments = (opts.attachments ?? []).filter(a => /^assets\/(shots\/)?[\w.-]+$/.test(a)).slice(0, 8)
-  // The model picked for this message, else the default in Bower settings, else Claude Code's own.
-  const model = opts.model && MODELS.includes(opts.model) ? opts.model : (await readSettings()).model ?? process.env.BOWER_MODEL
-  const context = key === 'project' ? await projectContext(project) : await sceneContext(project, key, opts)
+  // The model picked for this message, else the project's for this kind of work, else the Bower settings default.
+  const model = await pickModel(opts.task ?? 'chat', project, opts.model)
+  const context = key === 'project' ? await projectContext(project, opts) : await sceneContext(project, key, opts)
+
+  const chat = await getChat(pid, key)
+  const fresh = !!chat.sessionId && (chat.sessionTurns ?? 0) >= SESSION_TURNS
+  const resume = fresh ? null : chat.sessionId
+  const turns = resume ? chat.sessionTurns ?? 0 : 0
+  const recent = chat.messages.filter(m => m.role === 'user').slice(-3).map(m => `- ${m.text.length > 300 ? m.text.slice(0, 300) + '…' : m.text}`)
   const prompt = [
     context,
     '',
+    fresh && recent.length ? `This is a fresh session. The user's most recent earlier requests in this chat, already done (the files show the result):\n${recent.join('\n')}\n` : '',
     attachments.length ? `Reference images attached by the user (Read each one first):\n${attachments.map(a => `- ${a}`).join('\n')}\n` : '',
     `Request:\n${message}`
   ].join('\n')
 
-  const chat = await getChat(pid, key)
   chat.messages.push({ role: 'user', text: message, at: new Date().toISOString(), ...(attachments.length && { attachments }), ...(model && { model }) })
   await saveChat(pid, key, chat)
 
@@ -214,7 +232,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
     '--disallowedTools', visual ? 'WebFetch,WebSearch' : 'Bash,WebFetch,WebSearch'
   ]
   if (model) args.push('--model', model)
-  if (chat.sessionId) args.push('--resume', chat.sessionId)
+  if (resume) args.push('--resume', resume)
   // Read/Glob/Grep are refused outside the working directory in -p mode; --add-dir is the supported way to widen it.
   for (const c of allCodebases(project)) args.push('--add-dir', c.path)
 
@@ -228,7 +246,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
   proc.stdin.end(prompt)
 
   let result: { text: string, sessionId?: string, durationMs?: number, cost?: number, isError?: boolean } | null = null
-  let sessionId = chat.sessionId
+  let sessionId = resume
   let stderr = ''
   const timer = setTimeout(() => proc.kill(), TIMEOUT_MS)
 
@@ -264,12 +282,13 @@ export async function startChat(pid: string, key: string, message: string, opts:
     }
     const c = await getChat(pid, key)
     const r = result as typeof result
+    c.sessionTurns = turns + 1
     if (r && !r.isError) {
       c.sessionId = r.sessionId ?? sessionId ?? null
       c.messages.push({ role: 'assistant', text: r.text.trim(), at: new Date().toISOString(), durationMs: r.durationMs ?? Date.now() - job.startedAt, costUsd: r.cost })
       job.status = 'done'
     } else {
-      c.sessionId = sessionId ?? c.sessionId
+      c.sessionId = sessionId ?? resume
       const why = r?.text || stderr.trim().split('\n').slice(-4).join('\n') || `claude exited with code ${code}`
       c.messages.push({ role: 'error', text: why, at: new Date().toISOString(), durationMs: Date.now() - job.startedAt })
       job.status = 'error'

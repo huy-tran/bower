@@ -1,4 +1,5 @@
 import { cleanRepos, createApp, getApp, updateApp } from '../../../utils/apps'
+import { cleanModels } from '../../../utils/models'
 import { readSettings } from '../../../utils/settings'
 import { APP_MODES, type AppMode, type AudioInfo, type CaptionSettings, type Clip, type Codebase } from '../../../utils/store'
 
@@ -19,6 +20,8 @@ export default defineEventHandler(async (event) => {
     captions?: Partial<CaptionSettings>
     brandKitId?: string | null
     visualChecks?: boolean
+    // Replaces the per-task models; a task left out (or set to anything unknown) uses the Bower settings default.
+    models?: Record<string, string | null>
     codebases?: Partial<Codebase>[]
     // The shared app this project is about (apps.ts), and how it shows it. `app` with an address links the app
     // with that address, creating it if needed (older editors, imports).
@@ -69,6 +72,7 @@ export default defineEventHandler(async (event) => {
   if (typeof body.artDirection === 'string') p.artDirection = body.artDirection
   if (body.fps) p.fps = clamp(body.fps, 12, 60, 30)
   if (typeof body.visualChecks === 'boolean') p.visualChecks = body.visualChecks
+  if (body.models !== undefined) p.models = cleanModels(body.models)
   // The whole list is replaced; every path must be a folder on this machine.
   if (Array.isArray(body.codebases)) p.codebases = await cleanRepos(body.codebases) as Codebase[]
   const brandChanged = body.brandKitId !== undefined && (body.brandKitId || null) !== p.brandKitId

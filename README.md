@@ -48,12 +48,14 @@ Builds are not code-signed. On first install Windows SmartScreen shows "Windows 
 ## Features
 
 **Working with Claude**
-- **Storyboard** (the Storyboard button): write a brief, set a target length and whether you want narration, and Claude drafts the scene list with a title, duration, brief and voice-over line per scene. Edit, reorder, add or remove scenes, then create them, replacing or following the current ones. Each scene keeps its brief in its meta block, and Claude builds the scenes one after another while the header shows progress.
+- **Storyboard** (the Storyboard button): write a brief, set a target length and whether you want narration, and Claude drafts the scene list with a title, duration, brief and voice-over line per scene. Edit, reorder, add or remove scenes, then create them, replacing or following the current ones. Each scene keeps its brief in its meta block, and Claude builds the scenes one after another while the header shows progress. The dialog has a model picker for planning and one for building, which start on the project's settings.
 - A chat per scene, plus a Project chat that can change any scene. Every change is saved as a version, with Undo, restore, and a side-by-side **Compare versions** view.
-- **Visual checks** (Settings, General): Claude renders snapshots of the frames it changed and looks at them before replying, and runs the seam checker when a cut should be invisible.
+- **Visual checks** (Settings, General): Claude renders snapshots of the frames it changed and looks at them before replying (on builds and on edits that change layout or motion, not small copy or timing tweaks), and runs the seam checker when a cut should be invisible.
 - **Reference images**: attach with the paperclip, drag onto the chat, or paste. Claude looks at them before editing.
 - **Playhead chip**: the pin button inserts "(at 1.20s)" so you can point at a moment. Claude is also told where your playhead is.
-- **Model picker**: Default, Opus, Sonnet or Haiku, per message.
+- **Model picker**: Default, Opus, Sonnet or Haiku, per message. Default is the project's model for chat edits.
+- **Models per project** (Settings, General): pick the model for planning storyboards, building scenes and chat edits. Anything left on "Bower default" uses the model in Bower settings. Codebase scans use Sonnet and app notes use Haiku.
+- **Fresh sessions**: each chat resumes its Claude session, so long chats resend more history with every message. After 8 messages Bower starts a new session with a short recap of the latest requests. "Fresh start" in the chat does it straight away and keeps the messages on screen.
 - Replies stream in as Claude writes, with a live list of what it is reading, editing and looking at.
 - **Voice input**: see below.
 - **Fix with Claude**: when a scene throws an error, the error banner offers a one-click fix.
@@ -125,7 +127,7 @@ Bower runs on each person's own machine and uses their own Claude Code login. No
 | Variable | Purpose |
 | --- | --- |
 | `BOWER_STORAGE` | Projects folder (default `storage/projects`; trash and brand kits live next to it) |
-| `BOWER_MODEL` | Default model passed to `claude --model` (the chat's model picker overrides it) |
+| `BOWER_MODEL` | Model passed to `claude --model` when neither the project nor Bower settings pick one. Also replaces the lighter models used for codebase scans and app notes |
 | `CLAUDE_BIN` | Path to the `claude` executable |
 
 ## Shortcuts

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // Everything that is a setting of the open project, in one place. Fields save as you change them.
+import type { ModelTask } from '~/composables/useModels'
+
 export type SettingsTab = 'general' | 'art' | 'brand' | 'codebase' | 'app' | 'shots' | 'sound'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -26,6 +28,7 @@ const current = computed(() => tabs.value.find(t => t.value === tab.value) ?? ta
 const draft = reactive({
   name: '',
   visualChecks: true,
+  models: {} as Partial<Record<ModelTask, string>>,
   artDirection: '',
   repos: [] as { label: string, path: string, notes: string }[],
   appRepos: [] as { label: string, path: string, notes: string }[],
@@ -43,6 +46,7 @@ watch([open, project], ([o]) => {
   if (!o || !p) return
   draft.name = p.name
   draft.visualChecks = p.visualChecks
+  draft.models = { ...p.models }
   draft.artDirection = p.artDirection
   draft.repos = p.codebases.map(c => ({ ...c }))
   draft.appRepos = (p.appCodebases ?? []).map(c => ({ ...c }))
@@ -71,6 +75,25 @@ function save(body: Record<string, unknown>, delay = 400) {
 
 const saveName = () => { if (draft.name.trim()) save({ name: draft.name.trim() }) }
 const saveVisual = (v: boolean) => { draft.visualChecks = v; save({ visualChecks: v }, 0) }
+
+// The model for each kind of work; "default" removes the project's pick so the Bower settings default applies.
+const MODEL_TASKS: { value: ModelTask, label: string, help: string }[] = [
+  { value: 'plan', label: 'Planning', help: 'Drafting storyboards' },
+  { value: 'build', label: 'Building', help: 'Building scenes from a storyboard, new versions for social' },
+  { value: 'chat', label: 'Chat edits', help: 'Your messages, unless the chat picks one' }
+]
+const models = useModels()
+const taskModelItems = computed(() => [
+  { label: `Bower default (${modelName(models.bowerDefault.value)})`, value: 'default', description: 'The default model in Bower settings' },
+  ...MODEL_CHOICES
+])
+function saveModel(task: ModelTask, v: string) {
+  const next = { ...draft.models }
+  if (v === 'default') delete next[task]
+  else next[task] = v
+  draft.models = next
+  save({ models: next }, 0)
+}
 const saveArt = () => save({ artDirection: draft.artDirection }, 600)
 const saveNarrator = () => save({ narrator: { ...draft.narrator } })
 // Pronunciation fixes: saved as a whole list; rows without a term are dropped on save.
@@ -529,6 +552,13 @@ function download(format: 'srt' | 'vtt') {
             </UFormField>
             <UFormField label="Visual checks" description="Claude renders frames to check its own work before replying. Slower, better results.">
               <USwitch :model-value="draft.visualChecks" aria-label="Visual checks" @update:model-value="saveVisual" />
+            </UFormField>
+            <UFormField label="Claude models" description="Lighter models use far fewer tokens. Opus is worth it for building scenes; Sonnet handles planning and most edits well.">
+              <div class="grid gap-3 sm:grid-cols-3">
+                <UFormField v-for="t in MODEL_TASKS" :key="t.value" :label="t.label" :help="t.help" size="sm">
+                  <USelect :model-value="draft.models[t.value] ?? 'default'" :items="taskModelItems" class="w-full" :ui="{ content: 'min-w-72' }" @update:model-value="v => saveModel(t.value, String(v))" />
+                </UFormField>
+              </div>
             </UFormField>
           </div>
 

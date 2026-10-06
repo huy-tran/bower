@@ -19,6 +19,6 @@ export default defineEventHandler(async (event) => {
     'Every scene file still has the old layout. Re-lay out every scene for the new stage: reposition and resize elements, re-wrap or resize text,',
     'and restack side-by-side layouts vertically where the frame is narrower. Keep the same content, choreography, timing and style.',
     'Keep important content inside a safe area 8% in from every edge. Check each scene with the snapshot tool if it is available.'
-  ].join(' '), { origin: `${url.protocol}//${url.host}` })
+  ].join(' '), { origin: `${url.protocol}//${url.host}`, task: 'build' })
   return { id: p.id, name: p.name }
 })

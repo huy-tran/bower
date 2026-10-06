@@ -63,6 +63,8 @@ export interface ProjectView {
   captions: { burnIn: boolean, position: 'bottom' | 'top', size: number }
   brandKitId: string | null
   visualChecks: boolean
+  // The Claude model for planning, building and chat edits; a missing task uses the Bower settings default.
+  models: Partial<Record<'plan' | 'build' | 'chat', string>>
   // This project's own repositories; the shared app's come separately as appCodebases.
   codebases: { label: string, path: string, notes: string }[]
   // The shared app this project is about (Bower settings, Apps), with this project's way of showing it.

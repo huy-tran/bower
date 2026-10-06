@@ -23,6 +23,14 @@ const buildItems = [
 ]
 const applying = ref(false)
 
+// Models for this run; "project" means the project's own setting (or the Bower default behind it).
+const models = useModels()
+const planModel = ref('project')
+const buildModel = ref('project')
+const planItems = computed(() => models.withFallback('project', 'Project setting', models.projectModel('plan')))
+const buildModelItems = computed(() => models.withFallback('project', 'Project setting', models.projectModel('build')))
+const pick = (v: string) => v === 'project' ? undefined : v
+
 const total = computed(() => scenes.value.reduce((a, s) => a + s.duration, 0))
 const words = (s: string) => s.trim() ? s.trim().split(/\s+/).length : 0
 const tooLong = (s: PlanScene) => s.voice && words(s.voice) > s.duration / 400 + 1
@@ -35,7 +43,7 @@ async function plan() {
   activity.value = 'Starting Claude…'
   const pid = project.value!.id
   try {
-    await $fetch(`/api/projects/${pid}/storyboard`, { method: 'POST', body: { brief: form.brief, seconds: form.autoLength ? undefined : form.seconds, narration: form.narration } })
+    await $fetch(`/api/projects/${pid}/storyboard`, { method: 'POST', body: { brief: form.brief, seconds: form.autoLength ? undefined : form.seconds, narration: form.narration, model: pick(planModel.value) } })
     for (;;) {
       await new Promise(r => setTimeout(r, 1500))
       const j = await $fetch<{ status: string, activity: string[], plan?: PlanScene[], error?: string }>(`/api/projects/${pid}/storyboard`)
@@ -73,7 +81,7 @@ async function apply() {
     open.value = false
     const note = { all: 'Claude is building them one by one. Watch the scene strip.', step: 'Claude builds the first scene, then asks you in the header before going on.', none: 'Each scene holds its brief. Open a scene and ask Claude to build it.' }
     toast.add({ title: `${res.created.length} scenes created`, description: note[build.value], color: 'success' })
-    if (build.value !== 'none') story.buildAll(pid, res.created, build.value)
+    if (build.value !== 'none') story.buildAll(pid, res.created, build.value, pick(buildModel.value))
     scenes.value = []
     step.value = 'brief'
   } catch (err: any) {
@@ -91,13 +99,16 @@ async function apply() {
         <UFormField label="Brief" help="Who it is for, what it should get across, the tone, and anything it must include or avoid. Claude also reads the art direction, brand kit, linked code and app notes.">
           <UTextarea v-model="form.brief" :rows="7" autoresize class="w-full" placeholder="e.g. A 45-second launch teaser for the new booking flow, aimed at clinic managers. Calm and confident. Show the three steps: pick a slot, confirm the patient, send the reminder. End on the logo and the line “Less admin. More care.”" />
         </UFormField>
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid gap-4 sm:grid-cols-3">
           <UFormField :label="form.autoLength ? 'Target length' : `Target length · ${form.seconds}s`">
             <USwitch v-model="form.autoLength" label="Let Claude choose from the brief" />
             <USlider v-if="!form.autoLength" v-model="form.seconds" :min="10" :max="300" :step="5" class="mt-3" />
           </UFormField>
           <UFormField label="Narration">
             <USwitch v-model="form.narration" label="Write a voice-over line for each scene" />
+          </UFormField>
+          <UFormField label="Model for planning">
+            <USelect v-model="planModel" :items="planItems" class="w-full" :ui="{ content: 'min-w-72' }" :disabled="planning" />
           </UFormField>
         </div>
         <div v-if="planning" class="space-y-1">
@@ -132,7 +143,12 @@ async function apply() {
         </div>
         <div class="grid gap-4 border-t border-default pt-3 sm:grid-cols-2">
           <URadioGroup v-model="mode" legend="Placement" :items="[{ label: 'Replace the current scenes (they go to the trash)', value: 'replace' }, { label: 'Add after the current scenes', value: 'append' }]" />
-          <URadioGroup v-model="build" legend="Building" :items="buildItems" />
+          <div class="space-y-3">
+            <URadioGroup v-model="build" legend="Building" :items="buildItems" />
+            <UFormField v-if="build !== 'none'" label="Model for building" help="Each scene is a full build, so this is where most tokens go.">
+              <USelect v-model="buildModel" :items="buildModelItems" class="w-full" :ui="{ content: 'min-w-72' }" />
+            </UFormField>
+          </div>
         </div>
       </div>
     </template>

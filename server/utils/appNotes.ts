@@ -2,6 +2,7 @@ import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
 import { readSession } from './session'
 import { updateApp } from './apps'
+import { lightModel } from './models'
 import { describeNetError, projectApp, withProfile } from './shots'
 import { projectDir } from './store'
 
@@ -83,8 +84,7 @@ export async function startNotes(pid: string) {
       '',
       JSON.stringify(found)
     ].join('\n')
-    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--allowedTools', 'Read', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent,Glob,Grep']
-    if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
+    const args = ['-p', '--output-format', 'stream-json', '--verbose', '--allowedTools', 'Read', '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent,Glob,Grep', '--model', lightModel('haiku')]
     const text = await new Promise<string>((resolve, reject) => {
       const proc = spawnClaude(bin, args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
       let out = '', isError = false, stderr = ''

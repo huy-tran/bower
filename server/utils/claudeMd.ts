@@ -82,9 +82,10 @@ function visualSection() {
     `- ${code('node bower.mjs seam [sceneId]')} reports what percentage of pixels change across each cut, with a side-by-side image.`,
     '  Under 1% reads as seamless.',
     '',
-    'After any visual change, snap the key moments you changed and look at them before replying. Fix what looks wrong.',
+    'After a change to layout, elements or motion, snap the key moments you changed and look at them before replying. Fix what looks wrong.',
+    'Small copy, colour or timing tweaks that cannot move anything out of place need no snapshot.',
     'When the user asked for a seamless cut, run the seam check and keep going until it is under 1%, then report the number.',
-    'Do not snap more than you need: a handful of well-chosen moments is enough.',
+    'Each frame you read is an image and costs far more than text: snap two or three well-chosen moments, not every second.',
     '',
     ''
   ].join('\n')

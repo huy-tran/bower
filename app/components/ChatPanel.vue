@@ -31,14 +31,10 @@ const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval>
 
 const tabs = [{ label: 'Scene', value: 'scene' }, { label: 'Project', value: 'project' }]
-const MODELS = [
-  { label: 'Default model', value: 'default', description: 'The one set in Bower settings' },
-  { label: 'Opus', value: 'opus', description: 'Best for building scenes' },
-  { label: 'Sonnet', value: 'sonnet', description: 'Fast, good for tweaks' },
-  { label: 'Haiku', value: 'haiku', description: 'Fastest, simple edits' }
-]
-// "Default" sends no model, so the server uses the one in Bower settings (or Claude Code's own). A pick here
-// applies to this editor session only.
+const models = useModels()
+const MODELS = computed(() => models.withFallback('default', 'Default', models.projectModel('chat')))
+// "Default" sends no model, so the server uses the project's model for chat edits (or the Bower settings default).
+// A pick here applies to this editor session only.
 const model = ref('default')
 
 // How Claude shows the app in this scene (saved in the scene's meta block); empty means the project setting.
@@ -116,6 +112,15 @@ async function send(text?: string) {
     })
   } catch (e) {
     fail(e, 'Could not start Claude')
+  }
+}
+
+async function freshStart() {
+  try {
+    await chat.freshSession(pid.value, key.value)
+    toast.add({ title: 'Fresh start', description: 'Your next message starts a new Claude session. It still sees the scene files.', color: 'success' })
+  } catch (e) {
+    fail(e, 'Could not start afresh')
   }
 }
 
@@ -333,7 +338,10 @@ function timeAgo(iso: string) {
         <UTooltip text="Delete scene"><UButton size="sm" color="error" variant="ghost" icon="i-heroicons-trash" aria-label="Delete scene" :disabled="project.scenes.length <= 1 || busy" @click="confirmDelete = true" /></UTooltip>
       </template>
       <span v-else class="text-xs text-muted">Changes can touch any scene, and each changed scene gets a new version.</span>
-      <UButton class="ml-auto" size="sm" color="neutral" variant="ghost" label="Clear chat" :disabled="busy || !messages.length" @click="chat.clear(pid, key)" />
+      <UTooltip text="Start Claude afresh on the next message: earlier messages stay here but are not sent again, which saves tokens. Bower also does this every few messages.">
+        <UButton class="ml-auto" size="sm" color="neutral" variant="ghost" label="Fresh start" :disabled="busy || !messages.length" @click="freshStart" />
+      </UTooltip>
+      <UButton size="sm" color="neutral" variant="ghost" label="Clear chat" :disabled="busy || !messages.length" @click="chat.clear(pid, key)" />
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">

@@ -8,6 +8,8 @@ const state = reactive({
   building: false,
   mode: 'all' as BuildMode,
   pid: '',
+  // The model picked for this build; undefined uses the project's model for building.
+  model: undefined as string | undefined,
   queue: [] as string[],
   done: 0,
   total: 0,
@@ -30,16 +32,16 @@ export function useStoryboard() {
   async function buildOne(pid: string, id: string, prompt: string) {
     const title = state.current
     try {
-      await chat.send(pid, id, prompt)
+      await chat.send(pid, id, prompt, { task: 'build', model: state.model })
       while (chat.isBusy(pid, id)) await new Promise(r => setTimeout(r, 1000))
     } catch (err: any) {
       toast.add({ title: `Could not build “${title}”`, description: err?.data?.message || err?.message, color: 'error' })
     }
   }
 
-  async function buildAll(pid: string, sceneIds: string[], mode: BuildMode = 'all') {
+  async function buildAll(pid: string, sceneIds: string[], mode: BuildMode = 'all', model?: string) {
     if (state.building) return
-    Object.assign(state, { building: true, mode, pid, queue: [...sceneIds], done: 0, total: sceneIds.length, current: '', currentId: '', waiting: false, stopRequested: false })
+    Object.assign(state, { building: true, mode, pid, model, queue: [...sceneIds], done: 0, total: sceneIds.length, current: '', currentId: '', waiting: false, stopRequested: false })
     try {
       while (state.queue.length && !state.stopRequested) {
         const id = state.queue.shift()!

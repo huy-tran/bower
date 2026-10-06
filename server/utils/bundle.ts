@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { unzipSync, zipSync, strToU8, strFromU8, type Zippable } from 'fflate'
 import { createApp } from './apps'
+import { cleanModels } from './models'
 import { addVersion, APP_MODES, createProject, loadProject, projectDir, saveProject, type Project } from './store'
 
 // Project bundles hold what a teammate needs to keep working: project.json, scenes, audio and assets.
@@ -78,6 +79,7 @@ export async function importBundle(zip: Uint8Array) {
     clips: (Array.isArray(src.clips) ? src.clips : []).filter(c => c?.file && entries[`${prefix}audio/${c.file}`]),
     captions: { ...p.captions, ...src.captions },
     visualChecks: src.visualChecks ?? true,
+    models: cleanModels((src as any).models),
     // The kit itself is not shared, but its copy in brand/ still guides Claude.
     brandKitId: null
   }

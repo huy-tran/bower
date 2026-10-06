@@ -1,5 +1,6 @@
 import { requireClaude, spawnClaude } from './claudeBin'
 import { createInterface } from 'node:readline'
+import { pickModel } from './models'
 import { addVersion, allCodebases, blankScene, loadProject, newSceneId, projectDir, projectView, saveProject, sceneViews, writeScene } from './store'
 import { trashScene } from './trash'
 
@@ -29,7 +30,7 @@ function cleanPlan(raw: unknown): PlanScene[] {
   return out
 }
 
-export async function startPlan(pid: string, brief: string, opts: { seconds?: number, narration?: boolean } = {}) {
+export async function startPlan(pid: string, brief: string, opts: { seconds?: number, narration?: boolean, model?: string } = {}) {
   if (jobs.get(pid)?.status === 'running') return getPlan(pid)!
   const bin = await requireClaude()
   const p = await loadProject(pid)
@@ -66,7 +67,8 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
     '--disallowedTools', 'Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Agent'
   ]
   for (const c of allCodebases(p)) args.push('--add-dir', c.path)
-  if (process.env.BOWER_MODEL) args.push('--model', process.env.BOWER_MODEL)
+  const model = await pickModel('plan', p, opts.model)
+  if (model) args.push('--model', model)
   const proc = spawnClaude(bin, args, { cwd: projectDir(pid), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
   proc.stdin.end(prompt)
 

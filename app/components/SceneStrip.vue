@@ -59,7 +59,7 @@ async function addScene() {
   const brief = form.brief.trim()
   form.title = form.brief = ''
   if (brief) {
-    chat.send(p.id, res.id, `Build this scene from scratch: ${brief}`).catch(e => toast.add({ title: 'Could not start Claude', description: e.data?.message, color: 'error' }))
+    chat.send(p.id, res.id, `Build this scene from scratch: ${brief}`, { task: 'build' }).catch(e => toast.add({ title: 'Could not start Claude', description: e.data?.message, color: 'error' }))
   }
 }
 

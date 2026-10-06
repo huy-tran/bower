@@ -1,15 +1,16 @@
 <script setup lang="ts">
-// Bower's own settings for this computer, shared by every project: Claude Code, the default chat model, what
+// Bower's own settings for this computer, shared by every project: Claude Code, the default Claude model, what
 // new projects start with, and the shared apps (products) that projects pick from.
 import { VOICES } from '~/utils/speech'
 
 const { open, tab } = useBowerSettings()
 const toast = useToast()
 const ed = useEditor()
+const models = useModels()
 
 const tabs = [
   { label: 'Claude Code', value: 'claude', icon: 'i-heroicons-sparkles', description: 'Bower builds scenes with Claude Code on this computer.' },
-  { label: 'New projects', value: 'defaults', icon: 'i-heroicons-document-plus', description: 'What new projects start with, and the model chats use unless one is picked. Existing projects keep their own settings.' },
+  { label: 'New projects', value: 'defaults', icon: 'i-heroicons-document-plus', description: 'What new projects start with, and the Claude model used wherever a project does not pick one. Existing projects keep their own settings.' },
   { label: 'Apps', value: 'apps', icon: 'i-heroicons-window', description: 'The products your videos are about. Each is set up once (address, notes, code, sign-in) and shared by every project that picks it.' },
   { label: 'Appearance', value: 'appearance', icon: 'i-heroicons-swatch', description: 'How Bower looks on this computer. Your videos are not affected.' },
   { label: 'Shortcuts', value: 'keys', icon: 'i-heroicons-command-line', description: 'Change the keys for playback. They work the same in the browser and the desktop app, whenever you are not typing.' }
@@ -53,7 +54,7 @@ const saved = ref(false)
 let flash: ReturnType<typeof setTimeout>
 async function load() {
   const s = await $fetch<{ model?: string, defaults: Defaults }>('/api/settings').catch(() => null)
-  if (s) { settings.model = s.model || 'default'; settings.defaults = { ...s.defaults } }
+  if (s) { settings.model = s.model || 'default'; settings.defaults = { ...s.defaults }; models.setBowerDefault(s.model ?? null) }
 }
 watch(open, (o) => { if (o) { load(); loadApps() } }, { immediate: true })
 async function patch(body: Record<string, unknown>) {
@@ -61,6 +62,7 @@ async function patch(body: Record<string, unknown>) {
     const s = await $fetch<{ model?: string, defaults: Defaults }>('/api/settings', { method: 'PATCH', body })
     settings.model = s.model || 'default'
     settings.defaults = { ...s.defaults }
+    models.setBowerDefault(s.model ?? null)
     saved.value = true
     clearTimeout(flash)
     flash = setTimeout(() => (saved.value = false), 1500)
@@ -71,9 +73,7 @@ async function patch(body: Record<string, unknown>) {
 
 const MODELS = [
   { label: 'Claude Code’s default', value: 'default', description: 'Whatever Claude Code is set to use' },
-  { label: 'Opus', value: 'opus', description: 'Best for building scenes' },
-  { label: 'Sonnet', value: 'sonnet', description: 'Fast, good for tweaks' },
-  { label: 'Haiku', value: 'haiku', description: 'Fastest, simple edits' }
+  ...MODEL_CHOICES
 ]
 const SHAPES = [
   { label: 'Landscape 16:9 (1920×1080)', value: '1920x1080' },
@@ -187,7 +187,7 @@ async function addApp() {
           </div>
 
           <div v-else-if="tab === 'defaults'" class="space-y-5">
-            <UFormField label="Model for chats" help="Used when a message does not pick one. The picker in each chat still overrides it for that message.">
+            <UFormField label="Default model" help="For storyboards, building scenes and chats, unless a project picks its own in Project settings. The picker in each chat still overrides it for that message.">
               <USelect :model-value="settings.model" :items="MODELS" class="w-72" @update:model-value="v => patch({ model: v === 'default' ? null : v })" />
             </UFormField>
             <div class="grid grid-cols-2 gap-4">

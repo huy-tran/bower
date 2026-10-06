@@ -6,6 +6,7 @@ import { writeClaudeMd } from './claudeMd'
 import { getApp, migrateLegacyApp } from './apps'
 import { STORAGE } from './paths'
 import { readSettings } from './settings'
+import { cleanModels, type ProjectModels } from './models'
 
 export interface Section { start: number, end: number, label: string, energy: number }
 
@@ -66,6 +67,8 @@ export interface Project {
   captions: CaptionSettings
   brandKitId: string | null
   visualChecks: boolean
+  // The Claude model for each kind of work (models.ts); a missing task uses the default in Bower settings.
+  models: ProjectModels
   // Local code repositories Claude may read (via `claude --add-dir`) to base scenes on the real product: this
   // project's own. Machine-specific, so they are not exported.
   codebases: Codebase[]
@@ -126,7 +129,8 @@ export interface ChatMessage {
   attachments?: string[]
   model?: string
 }
-export interface Chat { sessionId: string | null, messages: ChatMessage[] }
+// `sessionTurns` counts the requests sent on the current Claude session, so long chats can start a fresh one.
+export interface Chat { sessionId: string | null, sessionTurns?: number, messages: ChatMessage[] }
 
 const ID = /^[a-z0-9][a-z0-9-]{0,80}$/
 
@@ -178,6 +182,7 @@ export async function loadProject(pid: string): Promise<Project> {
     ...p,
     app,
     appCodebases: shared?.codebases ?? [],
+    models: cleanModels(p.models),
     // Projects saved before multi-repo support had a single `codebase`.
     codebases: Array.isArray(p.codebases) ? p.codebases : (p as any).codebase?.path ? [{ label: 'Codebase', notes: '', ...(p as any).codebase }] : [],
     folder: normalizeFolder(p.folder),
@@ -331,7 +336,7 @@ export async function createProject(name: string, scenes?: { title: string, html
   const d = (await readSettings()).defaults
   const p: Project = {
     id, name, artDirection: '', width: size?.width ?? d.width, height: size?.height ?? d.height, fps: d.fps, scenes: [], audio: null,
-    clips: [], captions: { burnIn: false, position: 'bottom', size: 44 }, brandKitId: null, visualChecks: d.visualChecks, codebases: [], app: null, appCodebases: [], narrator: { ...DEFAULT_NARRATOR, voice: d.voice },
+    clips: [], captions: { burnIn: false, position: 'bottom', size: 44 }, brandKitId: null, visualChecks: d.visualChecks, models: {}, codebases: [], app: null, appCodebases: [], narrator: { ...DEFAULT_NARRATOR, voice: d.voice },
     folder: normalizeFolder(folder), createdAt: new Date().toISOString()
   }
   for (const s of scenes ?? [{ title: 'Intro', html: blankScene(name) }]) {

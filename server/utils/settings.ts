@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { isModel } from './models'
 import { STORAGE } from './paths'
 
 // Bower's own settings for this computer, shared by every project: where Claude Code is, the model chats use
@@ -17,7 +18,6 @@ const COMBO = /^(ctrl\+)?(alt\+)?(shift\+)?(meta\+)?([a-z0-9]|space|enter|tab|ba
 export interface BowerSettings { claudePath?: string, model?: string, defaults: NewProjectDefaults, hotkeys: Hotkeys }
 
 export const DEFAULTS: NewProjectDefaults = { width: 1920, height: 1080, fps: 30, visualChecks: true, appMode: 'shots', voice: 'af_heart' }
-const MODELS = ['opus', 'sonnet', 'haiku']
 const VOICES = ['af_heart', 'af_sarah', 'bm_fable']
 const SIZES = [[1920, 1080], [1080, 1920], [1080, 1080], [1080, 1350]]
 
@@ -34,7 +34,7 @@ export async function readSettings(): Promise<BowerSettings> {
 export async function patchSettings(patch: Partial<{ claudePath: string | null, model: string | null, defaults: Partial<NewProjectDefaults>, hotkeys: Partial<Record<HotkeyAction, string | null>> }>) {
   const next = await readRaw()
   if (patch.claudePath !== undefined) next.claudePath = patch.claudePath || undefined
-  if (patch.model !== undefined) next.model = patch.model && MODELS.includes(patch.model) ? patch.model : undefined
+  if (patch.model !== undefined) next.model = isModel(patch.model) ? patch.model : undefined
   if (patch.defaults) {
     const d = { ...DEFAULTS, ...next.defaults }
     const p = patch.defaults

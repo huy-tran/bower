@@ -8,7 +8,8 @@ export interface ChatMessage {
   model?: string
 }
 export interface ChatJob { status: 'running' | 'done' | 'error', prompt: string, startedAt: number, activity: string[], partial: string }
-export interface SendOptions { model?: string, attachments?: string[], at?: number }
+// `task: 'build'` marks a whole-scene build (storyboard), which uses the project's model for building.
+export interface SendOptions { model?: string, task?: 'chat' | 'build', attachments?: string[], at?: number }
 interface Thread { messages: ChatMessage[], job: ChatJob | null, loaded: boolean }
 
 const threads = reactive(new Map<string, Thread>())
@@ -54,6 +55,11 @@ async function clear(pid: string, key: string) {
   t.messages = []
 }
 
+// The next message starts a new Claude session (cheaper: no earlier conversation is sent); messages stay.
+async function freshSession(pid: string, key: string) {
+  await $fetch(`/api/projects/${pid}/chat/${key}?session=1`, { method: 'DELETE' })
+}
+
 async function cancel(pid: string, key: string) {
   await $fetch(`/api/projects/${pid}/chat/${key}?cancel=1`, { method: 'DELETE' })
 }
@@ -69,5 +75,5 @@ function queueAttachment(a: { path: string, url: string, name: string }) {
 }
 
 export function useChat() {
-  return { thread, load, send, clear, cancel, isBusy, queuedAttachments, queueAttachment }
+  return { thread, load, send, clear, freshSession, cancel, isBusy, queuedAttachments, queueAttachment }
 }
