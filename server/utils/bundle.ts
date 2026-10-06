@@ -25,7 +25,7 @@ export async function exportBundle(pid: string) {
   const files: Zippable = {
     // The shared app travels as its address and notes (the importer links or creates the same app); its
     // repositories and sign-in stay on this machine.
-    'project.json': strToU8(JSON.stringify({ ...p, codebases: [], appCodebases: undefined, app: p.app ? { url: p.app.url, notes: p.app.notes, mode: p.app.mode } : null, format: 'bower-project@1' }, null, 2))
+    'project.json': strToU8(JSON.stringify({ ...p, codebases: [], appCodebases: undefined, published: undefined, app: p.app ? { url: p.app.url, notes: p.app.notes, mode: p.app.mode } : null, format: 'bower-project@1' }, null, 2))
   }
   for (const d of INCLUDE) {
     for (const f of await walk(join(root, d))) {

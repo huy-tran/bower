@@ -98,6 +98,7 @@ Builds are not code-signed. On first install Windows SmartScreen shows "Windows 
 - MP4 with the full sound mix, animated GIF, or ProRes 4444 with a transparent background for Premiere, Final Cut or After Effects.
 - Frames render in parallel across several headless Chrome instances.
 - **Web player**: one `.html` file with every scene, transition, caption and sound built in.
+- **Publish**: puts the web player on its own Cloudflare Pages site (`<name>.pages.dev`) in one click. Publishing again updates the same link.
 
 ## Sharing
 
@@ -113,6 +114,7 @@ Bower runs on each person's own machine and uses their own Claude Code login. No
 
 - **Render tab, then Render:** makes an MP4, GIF or ProRes file.
 - **Render tab, then Web player, then Download:** makes one `.html` file that plays in any browser with no server, so you can email it, post it in Slack, or host it anywhere as a static file (Netlify Drop, S3, a website). It loads fonts from Google Fonts, so viewers need an internet connection for the typography to be exact.
+- **Render tab, then Web player, then Publish:** uploads that file as `index.html` to a Cloudflare Pages site for this project and gives you the link to send. Connect your Cloudflare account once in Bower settings, Publishing, with an API token that has the permission Account, Cloudflare Pages, Edit. The first publish asks for the site name; if a site with that name already exists in the account, Bower asks before replacing it.
 
 ## How it works
 

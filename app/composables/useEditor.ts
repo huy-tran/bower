@@ -72,6 +72,8 @@ export interface ProjectView {
   appCodebases: { label: string, path: string, notes: string }[]
   narrator: { voice: string, speed: number, shortlist: string[], pronunciations: { term: string, sayAs: string }[] }
   folder: string
+  // Where the web player was last published on Cloudflare Pages.
+  published?: { pagesProject: string, url: string, deploymentUrl: string, at: string } | null
   versions: Record<string, number>
 }
 

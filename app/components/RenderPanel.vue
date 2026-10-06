@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ProjectView } from '~/composables/useEditor'
 interface Job { id: string, status: 'running' | 'encoding' | 'done' | 'error' | 'cancelled', frame: number, total: number, workers: number, format: string, startedAt: number, finishedAt?: number, file?: string, error?: string, label: string }
 interface Queued { id: string, label: string, format: string, addedAt: number, position: number }
 interface Render { name: string, size: number, at: string }
@@ -6,6 +7,7 @@ interface Preset { id: string, name: string, format: 'mp4' | 'gif' | 'mov', fps:
 
 const { project, selected } = useEditor()
 const toast = useToast()
+const bowerSettings = useBowerSettings()
 
 const range = ref<'video' | 'scene'>('video')
 const fps = ref(30)
@@ -133,7 +135,38 @@ const mb = (b: number) => `${(b / 1024 / 1024).toFixed(1)} MB`
 const took = (j: Job) => `${Math.round(((j.finishedAt ?? Date.now()) - j.startedAt) / 1000)}s`
 const when = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
-watch(pid, () => { job.value = null; playing.value = null; poll() }, { immediate: true })
+// Publishing the web player to the project's own Cloudflare Pages site. The first time picks the site name; a name
+// already in the Cloudflare account is only reused once confirmed.
+const siteName = ref('')
+const publishing = ref(false)
+const taken = ref('')
+const freshSite = ref(false)
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 58)
+async function publish(replace = false) {
+  publishing.value = true
+  taken.value = ''
+  const first = !project.value!.published
+  try {
+    const res = await $fetch<NonNullable<ProjectView['published']>>(`/api/projects/${pid.value}/publish`, { method: 'POST', body: { name: siteName.value, replace } })
+    project.value!.published = res
+    freshSite.value = first && !replace
+    toast.add({ title: 'Published', description: res.url, color: 'success' })
+  } catch (e: any) {
+    if (e?.statusCode === 409) taken.value = e.data?.message
+    else if (e?.statusCode === 422 && /Bower settings/.test(e.data?.message)) {
+      toast.add({ title: 'Connect Cloudflare first', description: e.data.message, color: 'warning', actions: [{ label: 'Open settings', onClick: () => bowerSettings.show('publishing') }] })
+    } else toast.add({ title: 'Could not publish', description: e?.data?.message || e?.message, color: 'error' })
+  } finally {
+    publishing.value = false
+  }
+}
+async function copyUrl(url: string) {
+  await navigator.clipboard.writeText(url)
+  toast.add({ title: 'Link copied', color: 'neutral' })
+}
+const publishedAt = computed(() => project.value?.published ? new Date(project.value.published.at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '')
+
+watch(pid, () => { job.value = null; playing.value = null; taken.value = ''; freshSite.value = false; siteName.value = slug(project.value?.name ?? ''); poll() }, { immediate: true })
 watch(renders, (r) => { if (!playing.value && r[0]) playing.value = r[0].name })
 onMounted(loadPresets)
 onBeforeUnmount(() => clearTimeout(timer))
@@ -166,7 +199,7 @@ onBeforeUnmount(() => clearTimeout(timer))
     </div>
 
     <div class="flex min-h-0 flex-col gap-4 overflow-y-auto">
-      <UCard>
+      <UCard class="shrink-0">
         <template #header>
           <h2 class="font-semibold text-highlighted">Export</h2>
         </template>
@@ -242,19 +275,44 @@ onBeforeUnmount(() => clearTimeout(timer))
         </template>
       </UCard>
 
-      <UCard>
+      <UCard class="shrink-0">
         <template #header>
           <h2 class="font-semibold text-highlighted">Web player</h2>
         </template>
         <p class="text-xs text-muted">
           One .html file with every scene<template v-if="project?.audio"> and the music</template> built in. It plays in any browser with no server,
-          so you can email it, drop it in Slack, or host it anywhere (Netlify Drop, S3, your site).
+          so you can email it, drop it in Slack, or publish it to Cloudflare Pages for a link to send.
         </p>
+        <div class="mt-4 space-y-3 border-t border-default pt-4">
+          <template v-if="project?.published">
+            <div class="flex items-center gap-1">
+              <UButton color="neutral" variant="link" class="min-w-0 flex-1 px-0 font-mono text-xs" icon="i-heroicons-globe-alt" :label="project.published.url.replace('https://', '')" :to="project.published.url" external target="_blank" :ui="{ label: 'truncate' }" />
+              <UTooltip text="Copy link"><UButton size="xs" color="neutral" variant="ghost" icon="i-heroicons-clipboard-document" aria-label="Copy link" @click="copyUrl(project.published.url)" /></UTooltip>
+            </div>
+            <p class="text-xs text-muted">
+              Published {{ publishedAt }}. Publishing again updates this link.
+              <template v-if="freshSite">A new site can take a minute or two before the link opens.</template>
+            </p>
+          </template>
+          <UFormField v-else label="Site name" size="sm" help="Your client gets this link. Publishing again later updates it.">
+            <UFieldGroup class="w-full">
+              <UInput v-model="siteName" size="sm" class="flex-1 font-mono text-xs" @update:model-value="taken = ''" />
+              <UBadge color="neutral" variant="outline" size="lg" label=".pages.dev" class="font-mono text-xs" />
+            </UFieldGroup>
+          </UFormField>
+          <UAlert v-if="taken" color="warning" variant="subtle" icon="i-heroicons-exclamation-triangle" :title="taken" description="Publishing replaces what that site shows now.">
+            <template #actions>
+              <UButton size="xs" color="warning" label="Publish over it" :loading="publishing" @click="publish(true)" />
+              <UButton size="xs" color="neutral" variant="ghost" label="Pick another name" @click="taken = ''" />
+            </template>
+          </UAlert>
+        </div>
         <template #footer>
           <div class="flex gap-2">
             <UButton class="flex-1 justify-center" color="neutral" icon="i-heroicons-arrow-down-tray" label="Download" :to="`/api/projects/${pid}/player?download=1`" external />
             <UButton color="neutral" variant="outline" icon="i-heroicons-arrow-top-right-on-square" label="Preview" :to="`/api/projects/${pid}/player`" external target="_blank" />
           </div>
+          <UButton block class="mt-2" icon="i-heroicons-cloud-arrow-up" :label="project?.published ? 'Publish update' : 'Publish'" :loading="publishing" :disabled="!!taken || (!project?.published && !siteName)" @click="publish()" />
         </template>
       </UCard>
     </div>

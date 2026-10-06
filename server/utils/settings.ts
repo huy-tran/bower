@@ -15,7 +15,9 @@ export type Hotkeys = Record<HotkeyAction, string>
 export const HOTKEYS: Hotkeys = { playPause: 'space', toggleScope: 'v', playFromStart: 'shift+space' }
 const COMBO = /^(ctrl\+)?(alt\+)?(shift\+)?(meta\+)?([a-z0-9]|space|enter|tab|backspace|delete|insert|home|end|pageup|pagedown|arrow(up|down|left|right)|f([1-9]|1[0-2])|[,./;'[\]\\`=-])$/
 
-export interface BowerSettings { claudePath?: string, model?: string, defaults: NewProjectDefaults, hotkeys: Hotkeys }
+// The Cloudflare account the web player is published to (publish.ts). The token never leaves this machine: the
+// settings route only says which account is set up.
+export interface BowerSettings { claudePath?: string, model?: string, cloudflare?: { accountId: string, apiToken: string }, defaults: NewProjectDefaults, hotkeys: Hotkeys }
 
 export const DEFAULTS: NewProjectDefaults = { width: 1920, height: 1080, fps: 30, visualChecks: true, appMode: 'shots', voice: 'af_heart' }
 const VOICES = ['af_heart', 'af_sarah', 'bm_fable']
@@ -31,10 +33,11 @@ export async function readSettings(): Promise<BowerSettings> {
 }
 
 // Validates each key; unknown keys and bad values are dropped. An empty string or null removes a setting.
-export async function patchSettings(patch: Partial<{ claudePath: string | null, model: string | null, defaults: Partial<NewProjectDefaults>, hotkeys: Partial<Record<HotkeyAction, string | null>> }>) {
+export async function patchSettings(patch: Partial<{ claudePath: string | null, model: string | null, cloudflare: { accountId: string, apiToken: string } | null, defaults: Partial<NewProjectDefaults>, hotkeys: Partial<Record<HotkeyAction, string | null>> }>) {
   const next = await readRaw()
   if (patch.claudePath !== undefined) next.claudePath = patch.claudePath || undefined
   if (patch.model !== undefined) next.model = isModel(patch.model) ? patch.model : undefined
+  if (patch.cloudflare !== undefined) next.cloudflare = patch.cloudflare || undefined
   if (patch.defaults) {
     const d = { ...DEFAULTS, ...next.defaults }
     const p = patch.defaults

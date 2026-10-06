@@ -23,6 +23,7 @@ export async function duplicateProject(pid: string, opts: { name?: string, width
     name: p.name,
     width,
     height,
+    published: null,
     createdAt: p.createdAt
   }
   await saveProject(next)

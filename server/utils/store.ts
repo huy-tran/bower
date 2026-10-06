@@ -79,6 +79,9 @@ export interface Project {
   narrator: Narrator
   // Virtual folder the project is filed under, like "Clients/Acme" ('' = top level). Storage on disk stays flat.
   folder: string
+  // Where the web player was last published on Cloudflare Pages (publish.ts). Tied to this machine's account, so
+  // copies and exports leave it behind.
+  published?: { pagesProject: string, url: string, deploymentUrl: string, at: string } | null
   createdAt: string
 }
 

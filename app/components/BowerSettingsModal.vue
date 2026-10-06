@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Bower's own settings for this computer, shared by every project: Claude Code, the default Claude model, what
-// new projects start with, and the shared apps (products) that projects pick from.
+// new projects start with, the shared apps (products) that projects pick from, and where web players are published.
 import { VOICES } from '~/utils/speech'
 
 const { open, tab } = useBowerSettings()
@@ -12,6 +12,7 @@ const tabs = [
   { label: 'Claude Code', value: 'claude', icon: 'i-heroicons-sparkles', description: 'Bower builds scenes with Claude Code on this computer.' },
   { label: 'New projects', value: 'defaults', icon: 'i-heroicons-document-plus', description: 'What new projects start with, and the Claude model used wherever a project does not pick one. Existing projects keep their own settings.' },
   { label: 'Apps', value: 'apps', icon: 'i-heroicons-window', description: 'The products your videos are about. Each is set up once (address, notes, code, sign-in) and shared by every project that picks it.' },
+  { label: 'Publishing', value: 'publishing', icon: 'i-heroicons-globe-alt', description: 'The Cloudflare account that Publish (Render tab, Web player) sends web players to. Each project gets its own Pages site.' },
   { label: 'Appearance', value: 'appearance', icon: 'i-heroicons-swatch', description: 'How Bower looks on this computer. Your videos are not affected.' },
   { label: 'Shortcuts', value: 'keys', icon: 'i-heroicons-command-line', description: 'Change the keys for playback. They work the same in the browser and the desktop app, whenever you are not typing.' }
 ]
@@ -50,11 +51,20 @@ const current = computed(() => tabs.find(t => t.value === tab.value) ?? tabs[0]!
 
 interface Defaults { width: number, height: number, fps: number, visualChecks: boolean, appMode: 'shots' | 'rebuild' | 'auto', voice: string }
 const settings = reactive<{ model: string, defaults: Defaults }>({ model: 'default', defaults: { width: 1920, height: 1080, fps: 30, visualChecks: true, appMode: 'shots', voice: 'af_heart' } })
+// Cloudflare: the token is checked on save and never sent back; a blank token field keeps the saved one.
+const cloudflare = reactive({ accountId: '', apiToken: '', saved: null as string | null, busy: false })
 const saved = ref(false)
 let flash: ReturnType<typeof setTimeout>
 async function load() {
-  const s = await $fetch<{ model?: string, defaults: Defaults }>('/api/settings').catch(() => null)
-  if (s) { settings.model = s.model || 'default'; settings.defaults = { ...s.defaults }; models.setBowerDefault(s.model ?? null) }
+  const s = await $fetch<{ model?: string, defaults: Defaults, cloudflare: { accountId: string } | null }>('/api/settings').catch(() => null)
+  if (s) {
+    settings.model = s.model || 'default'
+    settings.defaults = { ...s.defaults }
+    models.setBowerDefault(s.model ?? null)
+    cloudflare.saved = s.cloudflare?.accountId ?? null
+    cloudflare.accountId = cloudflare.saved ?? ''
+    cloudflare.apiToken = ''
+  }
 }
 watch(open, (o) => { if (o) { load(); loadApps() } }, { immediate: true })
 async function patch(body: Record<string, unknown>) {
@@ -68,6 +78,21 @@ async function patch(body: Record<string, unknown>) {
     flash = setTimeout(() => (saved.value = false), 1500)
   } catch (e: any) {
     toast.add({ title: 'Could not save', description: e?.data?.message || e?.message, color: 'error' })
+  }
+}
+
+async function saveCloudflare(remove = false) {
+  cloudflare.busy = true
+  try {
+    const res = await $fetch<{ accountId: string | null }>('/api/settings/cloudflare', { method: 'PUT', body: remove ? { remove: true } : { accountId: cloudflare.accountId, apiToken: cloudflare.apiToken } })
+    cloudflare.saved = res.accountId
+    cloudflare.accountId = res.accountId ?? ''
+    cloudflare.apiToken = ''
+    toast.add({ title: remove ? 'Cloudflare account removed' : 'Cloudflare account connected', color: remove ? 'neutral' : 'success' })
+  } catch (e: any) {
+    toast.add({ title: 'Could not connect to Cloudflare', description: e?.data?.message || e?.message, color: 'error' })
+  } finally {
+    cloudflare.busy = false
   }
 }
 
@@ -177,6 +202,20 @@ async function addApp() {
                   <span class="flex gap-1"><UKbd v-for="k in kbdsOf(f.combo)" :key="k" :value="k" size="sm" /></span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div v-else-if="tab === 'publishing'" class="space-y-5">
+            <UAlert v-if="cloudflare.saved" color="success" variant="subtle" icon="i-heroicons-check-circle" title="Connected" :description="`Account ${cloudflare.saved}`" />
+            <UFormField label="API token" help="In the Cloudflare dashboard: My Profile, API Tokens, Create Token, Custom token, with the permission Account, Cloudflare Pages, Edit.">
+              <UInput v-model="cloudflare.apiToken" type="password" class="w-full font-mono text-sm" :placeholder="cloudflare.saved ? 'Saved. Paste a new token to replace it.' : 'Paste the token'" autocomplete="off" />
+            </UFormField>
+            <UFormField label="Account ID" help="On the right of the account's home page in the dashboard. Leave blank if the token reaches only one account.">
+              <UInput v-model="cloudflare.accountId" class="w-full font-mono text-sm" placeholder="32 letters and numbers" />
+            </UFormField>
+            <div class="flex gap-2">
+              <UButton icon="i-heroicons-check" :label="cloudflare.saved ? 'Save' : 'Connect'" :loading="cloudflare.busy" :disabled="!cloudflare.saved && !cloudflare.apiToken.trim()" @click="saveCloudflare()" />
+              <UButton v-if="cloudflare.saved" color="error" variant="ghost" label="Remove" :disabled="cloudflare.busy" @click="saveCloudflare(true)" />
             </div>
           </div>
 
