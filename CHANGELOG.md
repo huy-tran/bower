@@ -3,6 +3,17 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.8.0 (6 October 2026)
+
+### New
+- **Publish to Cloudflare Pages**: in the Render tab, Web player, click Publish to put the video on its own
+  `<name>.pages.dev` site and copy the link for your client. Publishing again updates the same link. Connect your
+  Cloudflare account once in Bower settings, Publishing.
+
+### Fixed
+- The Export and Web player panels in the Render tab no longer get cut off at the bottom in a short window. The
+  column scrolls instead.
+
 ## 0.7.0 (6 October 2026)
 
 ### New
