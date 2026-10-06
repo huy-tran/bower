@@ -493,6 +493,7 @@ async function copyProjectPath() {
             </UTooltip>
           </UFieldGroup>
           <NarrationStatus />
+          <ClaudeLimitsMeter />
           <UTooltip v-if="setup.blocked.value" text="Claude cannot build scenes until Claude Code is installed and signed in">
             <UButton color="error" variant="soft" icon="i-heroicons-exclamation-triangle" label="Set up Claude Code" @click="bower.show('claude')" />
           </UTooltip>

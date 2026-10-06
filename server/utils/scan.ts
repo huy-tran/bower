@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline'
 import { updateApp } from './apps'
 import { lightModel } from './models'
 import { allCodebases, loadProject, saveProject } from './store'
+import { trackClaudeEvent } from './usage'
 
 // "Where to look" notes written by Claude itself: it reads a linked repository (read-only) and returns a short
 // orientation note, which is saved where the repo is linked: on the shared app or on the project. One scan per
@@ -64,6 +65,7 @@ export async function startScan(pid: string, path: string) {
   createInterface({ input: proc.stdout }).on('line', (line) => {
     let ev: any
     try { ev = JSON.parse(line) } catch { return }
+    trackClaudeEvent(pid, 'scan', ev)
     if (ev.type === 'assistant') {
       for (const c of ev.message?.content ?? []) {
         if (c.type !== 'tool_use') continue

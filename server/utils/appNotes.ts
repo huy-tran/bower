@@ -5,6 +5,7 @@ import { updateApp } from './apps'
 import { lightModel } from './models'
 import { describeNetError, projectApp, withProfile } from './shots'
 import { projectDir } from './store'
+import { trackClaudeEvent } from './usage'
 
 // "Getting around" notes written by Claude: Bower walks the signed-in app's menus (headless, on the project's
 // profile), collects each page's title, headings, buttons and table columns, and Claude turns that into a short
@@ -90,7 +91,7 @@ export async function startNotes(pid: string) {
       let out = '', isError = false, stderr = ''
       const timer = setTimeout(() => proc.kill(), TIMEOUT_MS)
       createInterface({ input: proc.stdout }).on('line', (line) => {
-        try { const ev = JSON.parse(line); if (ev.type === 'result') { out = String(ev.result ?? ''); isError = !!ev.is_error } } catch {}
+        try { const ev = JSON.parse(line); trackClaudeEvent(pid, 'notes', ev); if (ev.type === 'result') { out = String(ev.result ?? ''); isError = !!ev.is_error } } catch {}
       })
       proc.stderr.on('data', (d) => { stderr += d.toString() })
       proc.on('error', reject)

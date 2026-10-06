@@ -2,7 +2,7 @@
 // Everything that is a setting of the open project, in one place. Fields save as you change them.
 import type { ModelTask } from '~/composables/useModels'
 
-export type SettingsTab = 'general' | 'art' | 'brand' | 'codebase' | 'app' | 'shots' | 'sound'
+export type SettingsTab = 'general' | 'art' | 'brand' | 'codebase' | 'app' | 'shots' | 'sound' | 'usage'
 
 const open = defineModel<boolean>('open', { default: false })
 const tab = defineModel<SettingsTab>('tab', { default: 'general' })
@@ -20,7 +20,8 @@ const tabs = computed(() => [
   { label: 'Codebase', value: 'codebase', icon: 'i-heroicons-code-bracket', description: 'Repositories on this machine that Claude may read (never edit) so scenes can copy the product\'s real screens, components, data, colours and copy. Link each repo separately, for example the API and the frontend.' },
   { label: 'App', value: 'app', icon: 'i-heroicons-window', description: 'The running product. Sign in once, then you and Claude can take screenshots of its real screens for scenes.' },
   { label: 'Screenshots', value: 'shots', icon: 'i-heroicons-camera', disabled: !project.value?.app, description: 'Real screens of the running product. Capture them here, or Claude takes its own while it builds scenes.' },
-  { label: 'Sound', value: 'sound', icon: 'i-heroicons-speaker-wave', description: 'The narrator for generated voice-over, and how captions appear in the video.' }
+  { label: 'Sound', value: 'sound', icon: 'i-heroicons-speaker-wave', description: 'The narrator for generated voice-over, and how captions appear in the video.' },
+  { label: 'Usage', value: 'usage', icon: 'i-heroicons-chart-bar', description: 'Tokens and cost of the Claude work on this project: chats, storyboards, codebase scans and app notes.' }
 ])
 const current = computed(() => tabs.value.find(t => t.value === tab.value) ?? tabs.value[0]!)
 
@@ -569,6 +570,8 @@ function download(format: 'srt' | 'vtt') {
 
           <!-- Brand kit -->
           <BrandKitPanel v-else-if="tab === 'brand'" />
+
+          <ProjectUsagePanel v-else-if="tab === 'usage'" />
 
           <!-- Codebase -->
           <div v-else-if="tab === 'codebase'" class="space-y-5">

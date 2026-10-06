@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline'
 import { pickModel } from './models'
 import { addVersion, allCodebases, blankScene, loadProject, newSceneId, projectDir, projectView, saveProject, sceneViews, writeScene } from './store'
 import { trashScene } from './trash'
+import { trackClaudeEvent } from './usage'
 
 // Storyboard: Claude drafts a scene list from a brief (read-only, so it can consult CLAUDE.md, the brand kit and
 // linked repos), the user edits it, then scenes are created with the brief and narration in their meta block.
@@ -79,6 +80,7 @@ export async function startPlan(pid: string, brief: string, opts: { seconds?: nu
   createInterface({ input: proc.stdout }).on('line', (line) => {
     let ev: any
     try { ev = JSON.parse(line) } catch { return }
+    trackClaudeEvent(pid, 'storyboard', ev)
     if (ev.type === 'assistant') {
       for (const c of ev.message?.content ?? []) {
         if (c.type === 'tool_use') job.activity.push(`Reading ${String(c.input?.file_path || c.input?.pattern || c.input?.path || '').replace(projectDir(pid), '').replace(/^[\\/]/, '').replace(/\\/g, '/')}`.trim())

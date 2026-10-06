@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { requireClaude, spawnClaude } from './claudeBin'
 import { pickModel } from './models'
+import { trackClaudeEvent } from './usage'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -253,6 +254,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
   createInterface({ input: proc.stdout }).on('line', (line) => {
     let ev: any
     try { ev = JSON.parse(line) } catch { return }
+    trackClaudeEvent(pid, 'chat', ev)
     if (ev.session_id) sessionId = ev.session_id
     if (ev.type === 'stream_event') {
       const e = ev.event
