@@ -3,6 +3,14 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.10.0 (6 October 2026)
+
+### New
+- **Auto model for chat**: pick Auto in the chat box, or for Chat edits in Project settings, Claude models. Haiku
+  sizes up each request first and sends it to the lightest model that can do it: Haiku for small tweaks (copy,
+  colours, timing), Sonnet for most edits, Opus for building or redesigning scenes. Small tweaks also skip the
+  screenshot check. Sizing adds a few seconds before Claude starts and costs a fraction of a cent.
+
 ## 0.9.0 (6 October 2026)
 
 ### New
