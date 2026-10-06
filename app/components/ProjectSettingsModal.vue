@@ -84,10 +84,11 @@ const MODEL_TASKS: { value: ModelTask, label: string, help: string }[] = [
   { value: 'chat', label: 'Chat edits', help: 'Your messages, unless the chat picks one' }
 ]
 const models = useModels()
-const taskModelItems = computed(() => [
+const taskModelItems = (task: ModelTask) => [
   { label: `Bower default (${modelName(models.bowerDefault.value)})`, value: 'default', description: 'The default model in Bower settings' },
+  ...(task === 'chat' ? [AUTO_CHOICE] : []),
   ...MODEL_CHOICES
-])
+]
 function saveModel(task: ModelTask, v: string) {
   const next = { ...draft.models }
   if (v === 'default') delete next[task]
@@ -557,7 +558,7 @@ function download(format: 'srt' | 'vtt') {
             <UFormField label="Claude models" description="Lighter models use far fewer tokens. Opus is worth it for building scenes; Sonnet handles planning and most edits well.">
               <div class="grid gap-3 sm:grid-cols-3">
                 <UFormField v-for="t in MODEL_TASKS" :key="t.value" :label="t.label" :help="t.help" size="sm">
-                  <USelect :model-value="draft.models[t.value] ?? 'default'" :items="taskModelItems" class="w-full" :ui="{ content: 'min-w-72' }" @update:model-value="v => saveModel(t.value, String(v))" />
+                  <USelect :model-value="draft.models[t.value] ?? 'default'" :items="taskModelItems(t.value)" class="w-full" :ui="{ content: 'min-w-72' }" @update:model-value="v => saveModel(t.value, String(v))" />
                 </UFormField>
               </div>
             </UFormField>

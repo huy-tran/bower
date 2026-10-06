@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 import { requireClaude, spawnClaude } from './claudeBin'
-import { pickModel } from './models'
+import { AUTO, pickModel } from './models'
+import { SIZE_MODELS, sizeRequest, type RequestSize } from './router'
 import { trackClaudeEvent } from './usage'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
@@ -22,6 +23,8 @@ export interface ChatOptions {
   model?: string
   // 'build' when Bower builds a whole scene (storyboard, reformatting); 'chat' for the user's own requests.
   task?: 'chat' | 'build'
+  // Set when the Auto model sized the request; small ones skip the snapshot check.
+  size?: RequestSize
   attachments?: string[]
   at?: number
 }
@@ -93,7 +96,7 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
     codebaseLine(p),
     '',
     `Follow the scene contract in CLAUDE.md. Read \`${s.file}\` first. Only edit \`${s.file}\` unless the request clearly asks for changes to other scenes.`,
-    p.visualChecks ? snapLine(`node bower.mjs snap ${s.id} <ms...>`, opts.task) : '',
+    snapChecks(p, opts) ? snapLine(`node bower.mjs snap ${s.id} <ms...>`, opts.task) : '',
     'Reply with a short plain-prose summary of what you changed (no markdown headings, no code).'
   ]
   return lines.join('\n').replace(/\n{3,}/g, '\n\n')
@@ -101,6 +104,8 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
 
 // Every snapshot Claude reads is an image, which costs far more than text: full checks when building a scene,
 // and only where something could have moved out of place for smaller edits.
+const snapChecks = (p: Project, opts: ChatOptions) => p.visualChecks && opts.size !== 'small'
+
 function snapLine(cmd: string, task: ChatOptions['task']) {
   return task === 'build'
     ? `When the scene is built, check it with \`${cmd}\` and Read the PNGs before replying.`
@@ -119,7 +124,7 @@ async function projectContext(p: Project, opts: ChatOptions) {
     '',
     'Follow the scene contract in CLAUDE.md.',
     'To add, remove, rename or reorder scenes, edit the `scenes` array in `project.json` (keep it valid JSON; ids are lowercase-kebab-case) and create or delete the matching `scenes/<id>.html` files. Do not change other keys in project.json.',
-    p.visualChecks ? `${snapLine('node bower.mjs snap <sceneId> <ms...>', opts.task)} Use \`node bower.mjs seam\` for cuts.` : '',
+    snapChecks(p, opts) ? `${snapLine('node bower.mjs snap <sceneId> <ms...>', opts.task)} Use \`node bower.mjs seam\` for cuts.` : '',
     'Reply with a short plain-prose summary of what you changed (no markdown headings, no code).'
   ].join('\n')
 }
@@ -199,8 +204,24 @@ export async function startChat(pid: string, key: string, message: string, opts:
   await saveProject(project) // refresh CLAUDE.md and bower.mjs with the latest settings
   const attachments = (opts.attachments ?? []).filter(a => /^assets\/(shots\/)?[\w.-]+$/.test(a)).slice(0, 8)
   // The model picked for this message, else the project's for this kind of work, else the Bower settings default.
-  const model = await pickModel(opts.task ?? 'chat', project, opts.model)
-  const context = key === 'project' ? await projectContext(project, opts) : await sceneContext(project, key, opts)
+  let model = await pickModel(opts.task ?? 'chat', project, opts.model)
+  let context: string
+  const sized: string[] = []
+  // Hold the job slot while Haiku sizes the request, so a second message cannot start alongside.
+  if (model === AUTO) jobs.set(k, { status: 'running', prompt: message, startedAt: Date.now(), activity: ['Choosing a model…'], partial: '' })
+  try {
+    if (model === AUTO) {
+      const size = await sizeRequest(bin, pid, { message, scope: key === 'project' ? 'project' : 'scene', attachments: attachments.length })
+      // If sizing fails, Sonnet handles most edits well.
+      model = size ? SIZE_MODELS[size] : 'sonnet'
+      opts = { ...opts, size: size ?? undefined }
+      sized.push(size ? `A ${size} edit: using ${model}` : `Could not size the request: using ${model}`)
+    }
+    context = key === 'project' ? await projectContext(project, opts) : await sceneContext(project, key, opts)
+  } catch (e) {
+    jobs.delete(k)
+    throw e
+  }
 
   const chat = await getChat(pid, key)
   const fresh = !!chat.sessionId && (chat.sessionTurns ?? 0) >= SESSION_TURNS
@@ -219,7 +240,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
   await saveChat(pid, key, chat)
 
   const before = await snapshot(pid)
-  const job: ChatJob = { status: 'running', prompt: message, startedAt: Date.now(), activity: ['Starting Claude…'], partial: '' }
+  const job: ChatJob = { status: 'running', prompt: message, startedAt: Date.now(), activity: [...sized, 'Starting Claude…'], partial: '' }
   jobs.set(k, job)
 
   const tools = ['Read', 'Edit', 'Write', 'MultiEdit', 'Glob', 'Grep']

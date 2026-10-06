@@ -9,11 +9,14 @@ export const MODEL_TASKS: ModelTask[] = ['plan', 'build', 'chat']
 export type ProjectModels = Partial<Record<ModelTask, string>>
 
 export const isModel = (m: unknown): m is string => typeof m === 'string' && MODELS.includes(m)
+// Chat edits can also be 'auto': Haiku sizes each request and picks the model (see router.ts).
+export const AUTO = 'auto'
+const isChoice = (task: ModelTask, m: unknown): m is string => isModel(m) || (task === 'chat' && m === AUTO)
 
 export async function pickModel(task: ModelTask, p: Pick<Project, 'models'> | null, override?: string) {
-  if (isModel(override)) return override
+  if (isChoice(task, override)) return override
   const own = p?.models?.[task]
-  if (isModel(own)) return own
+  if (isChoice(task, own)) return own
   return (await readSettings()).model ?? process.env.BOWER_MODEL
 }
 
@@ -23,6 +26,6 @@ export const lightModel = (fallback: 'sonnet' | 'haiku') => process.env.BOWER_MO
 // Keeps only known tasks with known models; anything else means "use the default".
 export function cleanModels(raw: unknown): ProjectModels {
   const out: ProjectModels = {}
-  if (raw && typeof raw === 'object') for (const t of MODEL_TASKS) if (isModel((raw as any)[t])) out[t] = (raw as any)[t]
+  if (raw && typeof raw === 'object') for (const t of MODEL_TASKS) if (isChoice(t, (raw as any)[t])) out[t] = (raw as any)[t]
   return out
 }

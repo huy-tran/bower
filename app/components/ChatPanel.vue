@@ -32,7 +32,7 @@ let clock: ReturnType<typeof setInterval>
 
 const tabs = [{ label: 'Scene', value: 'scene' }, { label: 'Project', value: 'project' }]
 const models = useModels()
-const MODELS = computed(() => models.withFallback('default', 'Default', models.projectModel('chat')))
+const MODELS = computed(() => models.withFallback('default', 'Default', models.projectModel('chat'), true))
 // "Default" sends no model, so the server uses the project's model for chat edits (or the Bower settings default).
 // A pick here applies to this editor session only.
 const model = ref('default')

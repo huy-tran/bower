@@ -7,7 +7,9 @@ export const MODEL_CHOICES = [
   { label: 'Sonnet', value: 'sonnet', description: 'Strong and much lighter. Good for planning and most edits' },
   { label: 'Haiku', value: 'haiku', description: 'Fastest and lightest. Small tweaks' }
 ]
-const NAMES: Record<string, string> = Object.fromEntries(MODEL_CHOICES.map(m => [m.value, m.label]))
+// Chat edits only: Haiku sizes each request first and picks Haiku, Sonnet or Opus for it.
+export const AUTO_CHOICE = { label: 'Auto', value: 'auto', description: 'Picks the lightest model that can do each request' }
+const NAMES: Record<string, string> = Object.fromEntries([...MODEL_CHOICES, AUTO_CHOICE].map(m => [m.value, m.label]))
 export const modelName = (m?: string | null) => (m && NAMES[m]) || 'Claude Code’s default'
 
 // The default in Bower settings, shared so every picker shows the same fallback. Loaded once, kept in step by
@@ -26,8 +28,9 @@ export function useModels() {
   // What this project uses for a task when nothing is picked for the request itself.
   const projectModel = (task: ModelTask) => project.value?.models?.[task] ?? bowerDefault.value
   // Picker items where `value` means "no pick here", labelled with what that falls back to.
-  const withFallback = (value: string, label: string, model: string | null) => [
+  const withFallback = (value: string, label: string, model: string | null, auto = false) => [
     { label: `${label} (${modelName(model)})`, value, description: model ? 'Change it in Project settings' : 'Set one in Project or Bower settings' },
+    ...(auto ? [AUTO_CHOICE] : []),
     ...MODEL_CHOICES
   ]
 
