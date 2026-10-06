@@ -3,6 +3,22 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.7.0 (6 October 2026)
+
+### New
+- **Models per project**: in Settings, General, pick the Claude model for planning storyboards, building scenes and
+  chat edits. Anything left on "Bower default" uses the model in Bower settings.
+- The Storyboard dialog has a model picker for planning and one for building, starting on the project's settings.
+- **Fresh start** in the chat: your next message starts a new Claude session, so earlier messages are not sent again.
+  The messages stay on screen.
+
+### Improved
+- Bower uses fewer tokens:
+  - The default model in Bower settings now applies to storyboards too, not just chats.
+  - Codebase scans use Sonnet and app notes use Haiku.
+  - Long chats start a new Claude session every 8 messages, with a short recap of the latest requests.
+  - Claude only checks frames after changes to layout or motion, not after small copy, colour or timing tweaks.
+
 ## 0.6.4 (4 October 2026)
 
 ### Fixed

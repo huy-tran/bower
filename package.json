@@ -1,6 +1,6 @@
 {
   "name": "bower",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "A prompt-driven motion graphics editor",
   "private": true,
   "type": "module",
