@@ -3,6 +3,16 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.9.0 (6 October 2026)
+
+### New
+- **Usage per project**: in Settings, Usage, see the tokens and cost of the Claude work on the project (chats,
+  storyboards, codebase scans and app notes), by kind of work and by model. On a Claude subscription the cost is what
+  the same work would cost at API prices. Reset starts counting again, for example after invoicing.
+- **Claude plan meter**: the header shows how much of your 5-hour and weekly Claude limits is used and when they
+  reset. Click it for both limits.
+- **Limit alerts**: a warning at 80% and 95% of a limit, and a message when a limit is reached.
+
 ## 0.8.0 (6 October 2026)
 
 ### New
