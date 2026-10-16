@@ -3,6 +3,25 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.11.0 (16 October 2026)
+
+### New
+- **Edit by hand**: a new tab next to Chat with Claude for small changes that need no Claude run. Every change is
+  saved as a version marked "By hand", so Undo and History cover it, and Claude is told about it before your next
+  message so it keeps your changes.
+  - **Retype text in the preview**: click to pick an element, double-click text to retype it in place. Enter saves,
+    Esc cancels.
+  - **Settings**: scenes can offer the values worth tweaking (colours, sizes, copy) as fields, colour pickers,
+    sliders and menus, and the preview updates as you change them. New scenes get them; for older ones, click
+    Ask Claude to add settings.
+  - **Timing**: each animation is a bar on a small timeline. Drag it to move it, drag an edge to make it shorter or
+    longer, and drag the end marker to change the scene's length.
+  - **Code**: open the scene's code in an editor with a live preview, and save with Ctrl+S.
+  - **Ask Claude about this**: pick something in the preview and hand it to the chat, so "make this bigger" needs
+    no further description.
+- **Brand colours and fonts follow the kit**: scenes Claude writes now use the brand kit's colours and fonts through
+  variables, so changing the kit restyles them. Older scenes keep their own colours until Claude updates them.
+
 ## 0.10.0 (6 October 2026)
 
 ### New
