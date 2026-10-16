@@ -57,6 +57,13 @@ const sceneEdit = useSceneEdit()
 const target = computed(() => tab.value === 'scene' && sceneEdit.queuedTarget.value?.sceneId === selected.value?.id ? sceneEdit.queuedTarget.value : null)
 watch(sceneEdit.queuedTarget, (t) => { if (t) tab.value = 'scene' })
 
+// Claude works on saved scenes, so unsaved hand edits have to be saved (or discarded) before a message.
+const unsaved = computed(() => {
+  const d = project.value?.drafts ?? {}
+  if (tab.value === 'scene') return d[selected.value?.id ?? ''] ? [selected.value!.id] : []
+  return Object.keys(d)
+})
+
 const key = computed(() => tab.value === 'project' ? 'project' : selected.value?.id ?? '')
 const pid = computed(() => project.value?.id ?? '')
 const current = computed(() => pid.value && key.value ? chat.thread(pid.value, key.value) : null)
@@ -103,7 +110,7 @@ watch(key, () => dictation.stop())
 async function send(text?: string) {
   if (dictation.listening.value) await dictation.stop()
   const msg = (text ?? draft.value).trim()
-  if (!msg || busy.value || !key.value) return
+  if (!msg || busy.value || !key.value || unsaved.value.length) return
   const files = text ? [] : attachments.value.map(a => a.path)
   const t = text ? null : target.value
   if (!text) {
@@ -405,6 +412,19 @@ function timeAgo(iso: string) {
     </div>
 
     <div class="border-t border-default p-4">
+      <UAlert
+        v-if="unsaved.length && !busy"
+        class="mb-3"
+        color="warning"
+        variant="subtle"
+        icon="i-heroicons-pencil"
+        :title="tab === 'scene' ? 'This scene has unsaved hand edits' : `${unsaved.length} ${unsaved.length === 1 ? 'scene has' : 'scenes have'} unsaved hand edits`"
+        description="Claude works on the saved scene, so save or discard them first."
+        :actions="[
+          ...(tab === 'scene' ? [{ label: 'Save them', color: 'warning' as const, variant: 'solid' as const, size: 'xs' as const, onClick: () => sceneEdit.draft(pid, selected!.id, 'save') }] : []),
+          { label: 'Review', color: 'warning' as const, variant: 'outline' as const, size: 'xs' as const, onClick: () => { if (tab !== 'scene') select(unsaved[0]!); sceneEdit.sideTab.value = 'edit' } }
+        ]"
+      />
       <div v-if="tab === 'scene' && hasBeats && !busy" class="mb-2 flex flex-wrap gap-1.5">
         <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-signal" label="Snap motion to beats" @click="send('Retime this scene so its key motion moments land exactly on the music: big arrivals on downbeats, smaller accents on beats. Keep the choreography and look the same otherwise.')" />
         <UButton size="xs" color="neutral" variant="soft" icon="i-heroicons-scissors" label="Match the next cut" :disabled="selectedIndex >= project.scenes.length - 1" @click="send('Make the last frame of this scene match the first frame of the next scene exactly so the cut is invisible. Run the seam check and keep going until it is under 1%.')" />
@@ -459,7 +479,7 @@ function timeAgo(iso: string) {
               @click="dictation.toggle(draft)"
             />
           </UTooltip>
-          <UChatPromptSubmit class="shrink-0" :class="!dictation.supported && 'ml-auto'" :status="busy ? 'streaming' : 'ready'" :disabled="!busy && !draft.trim()" @stop="chat.cancel(pid, key)" />
+          <UChatPromptSubmit class="shrink-0" :class="!dictation.supported && 'ml-auto'" :status="busy ? 'streaming' : 'ready'" :disabled="!busy && (!draft.trim() || !!unsaved.length)" @stop="chat.cancel(pid, key)" />
         </template>
       </UChatPrompt>
       <p class="mt-1.5 flex items-center gap-1 text-xs text-dimmed">

@@ -128,6 +128,9 @@ watch(() => selected.value?.id, async (id) => {
           label="Working"
           :ui="{ leadingIcon: 'animate-spin' }"
         />
+        <UTooltip v-else-if="project.drafts?.[s.id]" text="Unsaved hand edits: the thumbnail shows the saved scene. Save them in Edit by hand.">
+          <UBadge class="absolute top-2 right-2" color="warning" variant="subtle" size="sm" icon="i-heroicons-pencil" label="Unsaved" />
+        </UTooltip>
         <UTooltip v-if="s.voice" :text="voiceTip(s.id)">
           <UBadge
             class="absolute bottom-2 right-2"

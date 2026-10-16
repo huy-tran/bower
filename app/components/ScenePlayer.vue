@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProjectView, SceneView, ScreenLayer } from '~/composables/useEditor'
-import { attachStageEditing } from '~/utils/stageEdit'
+import { attachStageEditing, describeSelector } from '~/utils/stageEdit'
 
 const props = defineProps<{
   project: ProjectView
@@ -20,8 +20,9 @@ const props = defineProps<{
 const chat = useChat()
 const toast = useToast()
 const edit = useSceneEdit()
+const layer = useLayerEdit()
 
-const srcFor = (s: SceneView) => frameUrl(props.project.id, s, undefined, props.version) + (props.editable ? '&edit=1' : '')
+const srcFor = (s: SceneView) => frameUrl(props.project.id, s, undefined, props.version) + (props.editable ? '&edit=1' : '') + (s.draft && !props.version ? '&draft=1' : '')
 
 // Hand editing inside each frame, attached when it loads (a reload has a new document).
 const editors = new Map<string, NonNullable<ReturnType<typeof attachStageEditing>>>()
@@ -31,9 +32,19 @@ function onLoad(s: SceneView) {
   const f = frames.get(s.id)
   if (!props.editable || !f) return
   edit.registerFrame(s.id, f)
+  edit.frameLoads.value++
+  // The picked element, as the reloaded frame has it (it may have gained a layer id).
+  if (edit.picked.value?.sceneId === s.id) edit.picked.value = describeSelector(f, s.id, edit.picked.value.selector) ?? edit.picked.value
   const ed = attachStageEditing(f, s.id, {
+    transform: layer.transform,
+    path: layer.path,
     pick: p => { edit.picked.value = p },
-    commit: (p, text) => edit.apply(props.project.id, s.id, p.index !== null ? { op: 'text', i: p.index, before: p.text, text } : { op: 'codeText', before: p.text, text }),
+    commit: async (p, text) => {
+      const ok = await edit.apply(props.project.id, s.id, p.index !== null ? { op: 'text', i: p.index, before: p.text, text } : { op: 'codeText', before: p.text, text })
+      // The panel's picked element shows the new text too.
+      if (ok && edit.picked.value?.selector === p.selector) edit.picked.value = { ...edit.picked.value, text }
+      return ok
+    },
     other: (p) => {
       edit.picked.value = p
       if (p.param) edit.focusParam.value = { name: p.param, n: Date.now() }

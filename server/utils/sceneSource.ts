@@ -85,6 +85,37 @@ export function stampElements(html: string) {
   return out + html.slice(last)
 }
 
+// Where each element of the markup starts, for "Show in code".
+export function elementStarts(html: string) {
+  return elements(html).filter(el => el.name !== 'script' && el.name !== 'style').map(el => ({ i: el.i, start: el.start }))
+}
+
+const attrRe = (name: string) => new RegExp(`\\s${name}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`, 'i')
+
+// An attribute of element i, as written (quotes removed), or null.
+export function elementAttr(html: string, i: number, name: string) {
+  const el = elements(html)[i]
+  if (!el) return null
+  const m = attrRe(name).exec(html.slice(el.start, el.openEnd))
+  return m ? m[1]!.replace(/^["']|["']$/g, '') : null
+}
+
+// Sets (or, with null, removes) an attribute of element i.
+export function setElementAttr(html: string, i: number, name: string, value: string | null) {
+  const el = elements(html)[i]
+  if (!el || el.name === 'script' || el.name === 'style') throw createError({ statusCode: 422, message: 'That element is no longer in the scene. Reload and try again.' })
+  let tag = html.slice(el.start, el.openEnd)
+  const m = attrRe(name).exec(tag)
+  const attr = value === null ? '' : ` ${name}="${value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"`
+  tag = m ? tag.slice(0, m.index) + attr + tag.slice(m.index + m[0].length) : tag + attr
+  return html.slice(0, el.start) + tag + html.slice(el.openEnd)
+}
+
+// Every data-ve-id in the markup, to keep new ones unique.
+export function layerIds(html: string) {
+  return new Set([...html.matchAll(/\sdata-ve-id\s*=\s*["']?([\w-]+)/g)].map(m => m[1]!))
+}
+
 // Elements holding only text (no child elements), which can be retyped in place.
 export function textElements(html: string) {
   return elements(html)

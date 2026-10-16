@@ -16,7 +16,11 @@ export interface SceneView {
   app: 'shots' | 'rebuild' | 'auto' | null
   // Settings people change without Claude ("params" in the scene's meta block).
   params: SceneParam[]
+  // Set on the selected scene when it has unsaved hand edits: duration, params and mtime are the draft's.
+  draft?: boolean
 }
+
+export interface DraftView { count: number, labels: string[], duration: number, params: SceneParam[], mtime: number }
 
 export interface SceneParam {
   name: string
@@ -89,6 +93,8 @@ export interface ProjectView {
   // Where the web player was last published on Cloudflare Pages.
   published?: { pagesProject: string, url: string, deploymentUrl: string, at: string } | null
   versions: Record<string, number>
+  // Unsaved hand edits by scene.
+  drafts: Record<string, DraftView>
 }
 
 export interface Seam { from: string, to: string, diff: number, url: string, transition: { type: string, duration: number } | null }
@@ -114,7 +120,13 @@ const clipEls = new Map<string, HTMLAudioElement>()
 let raf = 0
 let lastTick = 0
 
-const selected = computed(() => project.value?.scenes.find(s => s.id === selectedId.value) ?? project.value?.scenes[0] ?? null)
+// The selected scene as the main preview shows it: with its unsaved hand edits when it has some. The scene strip,
+// the whole-video view and renders use the saved scenes.
+const selected = computed<SceneView | null>(() => {
+  const s = project.value?.scenes.find(x => x.id === selectedId.value) ?? project.value?.scenes[0] ?? null
+  const d = s && project.value?.drafts?.[s.id]
+  return s && d ? { ...s, duration: d.duration, params: d.params, mtime: d.mtime, draft: true } : s
+})
 const selectedIndex = computed(() => project.value?.scenes.findIndex(s => s.id === selected.value?.id) ?? -1)
 
 const timelineStart = computed(() => mode.value === 'scene' ? (selected.value?.start ?? 0) : 0)

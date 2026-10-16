@@ -377,6 +377,34 @@ People also edit scenes by hand in the editor, without asking you. Write every s
     param unless asked, and keep its \`value\` when you edit the file: it may have been set by hand.
 - **Hand edits win.** When the prompt says the user changed something by hand, keep it unless the request undoes it.
 
+## Keyframes
+
+The editor has an After Effects-style inspector: people pick an element in the preview, drag it, scale it, and set
+keyframes on its position, scale, rotation, opacity, blur and style. These live in the meta block's \`tracks\`, keyed by
+the element's \`data-ve-id\`, and the runtime plays them on top of \`render(t)\`:
+
+\`\`\`html
+<script type="application/json" id="meta">{"duration": 3000, "tracks": {
+  "title": {"props": {"y": [[0, 60], [700, 0, "outExpo"]], "opacity": [[0, 0], [500, 1, "outCubic"]]}},
+  "card": {"props": {"scale": [[300, 0.92], [900, 1, "outBack"]], "radius": 24}}
+}}</script>
+<div class="headline" data-ve-id="title">Every part in its place</div>
+<div class="card" data-ve-id="card">...</div>
+\`\`\`
+
+- A property is one value or keyframes \`[ms, value, easing]\`; the easing applies on the way into that key (any \`VE.ease\`
+  name, or \`"cubic(x1,y1,x2,y2)"\`). Before the first key the first value holds, after the last the last.
+- Properties, in CSS units: \`x\`, \`y\` (px offsets), \`scale\` (1 = normal size), \`rotate\` (deg), \`opacity\` (0..1, multiplied with
+  the element's own), \`blur\` (px), \`typed\` (0..1, how much of the element's text shows, for a typing effect), \`color\`,
+  \`background\`, \`fontSize\` (px), \`letterSpacing\` (em), \`radius\` (px) and \`hidden\` (true/false). Wrap them in \`"props"\` as above.
+- Position, scale and rotation use the CSS \`translate\`, \`scale\` and \`rotate\` properties, which combine with a \`transform\`
+  that \`render(t)\` sets. Do not set those three properties from \`render(t)\` on an element that has tracks.
+- **Use keyframes for simple element motion** (entrances, exits, moves, fades, pops, colour changes) and keep \`render(t)\`
+  for what keyframes cannot do: procedural motion, many items in a loop, counters, typing into live UI, drawing paths,
+  motion tied to the music. Simple motion as keyframes can then be retimed and adjusted by hand.
+- Give each animated element a short, readable \`data-ve-id\` (lowercase, dashes) and keep existing ids and tracks when you
+  edit a scene: they may hold the user's own keyframes. A \`data-ve-name\` attribute is the layer's name in the editor.
+
 ## Cuts between scenes
 
 Scenes play back to back. Each cut is either a hard cut or a transition the user picked in the editor (crossfade,

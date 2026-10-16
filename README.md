@@ -65,11 +65,39 @@ Builds are not code-signed. On first install Windows SmartScreen shows "Windows 
 - **Linked codebases** (Settings, Codebase): link one or more local repos, for example the API and the frontend, each with a label and a note on where to look. Leave the note empty and Claude reads the repo and writes it (Rescan redoes it). Paste a path or use **Browse…**, which opens your computer's folder chooser. Claude can then read them (never edit them) to rebuild the product's real screens, components, data, colours and copy in scenes. Paths are per machine, so they are left out of exports.
 
 **Editing by hand** (the Edit by hand tab next to Chat with Claude)
-- Small changes need no Claude run. Each one is saved as a version marked "By hand", so Undo, Versions and History cover it, and Claude is told about hand edits before your next message so it keeps them. Editing is paused while Claude works on the scene.
-- **Retype text in the preview**: click to pick an element, double-click text to retype it in place (Enter saves, Esc cancels). Text written in the scene's markup changes directly; text the scene's script sets is changed where it appears once in the code, otherwise Bower suggests asking Claude. The Text list in the panel has every piece of markup text too.
-- **Settings**: scenes can expose values worth tweaking (colours, sizes, amounts, copy the script builds) as `params` in the meta block, read with `VE.param(name)`. The panel shows them as text fields, colour pickers, sliders, switches and menus, and the preview updates as you change them. Colour and number params are also CSS variables (`--ve-<name>`). Claude adds them when it builds scenes; for older scenes, **Ask Claude to add settings**.
-- **Timing**: every `VE.progress(t, start, duration, ease)` with plain numbers (or `VE.duration - n`, or `VE.stagger(i, step, start)`) is a bar on a small timeline. Drag a bar to move it, an edge to resize it, and the end marker to change the scene's length. Click a name for exact numbers and the easing.
-- **Code**: the Code button opens the scene file in an editor with a live preview of the unsaved code. Ctrl+S saves.
+- Small changes need no Claude run. They show in the preview straight away but stay unsaved: the panel shows how many there are, Undo takes them back one at a time, and **Save** (Ctrl+S) keeps them all as one version marked "By hand", or **Discard** drops them. Unsaved changes survive switching scenes or closing Bower, and the scene's thumbnail says Unsaved. Renders, the player and Claude only use saved scenes, so the chat asks you to save or discard before Claude works on that scene. Editing is paused while Claude works on the scene, and Claude is told about saved hand edits before your next message so it keeps them.
+- The panel has two tabs. **Layer** works on one element at a time, After Effects style. **Scene** has the scene's settings, its text and the timings in its code.
+- **Layers**: the scene's elements, listed outermost first. Pick one there or click it in the preview. A layer with keyframes shows a diamond. Markup elements can be renamed (`data-ve-name`).
+- **Transform box**: the picked element gets a box in the preview. Drag it to move, a corner to scale, the round handle above to rotate (Shift keeps to one axis, or to 15° steps). When its position has keyframes, its motion path shows as a dotted line with a diamond at each key.
+- **Inspector**: position, scale, rotation, opacity, blur and typed (how much of its text shows), plus colour, background, font size, letter spacing, corner radius and hidden. Drag a label left or right to change the value (Shift: faster, Alt: finer), or type it.
+  - The **stopwatch** turns keyframes on for a property, starting with one at the playhead. Turning it off keeps the value at the playhead.
+  - With keyframes on, changing a value adds or updates the keyframe at the playhead, and the **diamond** adds or removes one there. The arrows jump between keyframes.
+- **Keyframes**: the picked layer's keyframes sit on rows under the inspector. Drag a diamond to retime it, or click it to set its time, value and easing.
+  - Easing comes from presets (Linear, Ease, Ease in, Ease out, Strong ease out, Overshoot, Spring), or **Custom curve** gives two handles to shape it.
+- **Animate**: presets add keyframes to the picked layer at the playhead.
+  - Entrances: Fade in, Slide up, From the left, From the right, Pop, Zoom in, Blur in, Typewriter.
+  - Exits: Fade out, Slide down, Shrink, Blur out.
+  - They land on the element's resting values, so they work on something that already moves.
+- Keyframes live in the meta block's `tracks`, keyed by the element's `data-ve-id`, which Bower adds the first time you change an element. Elements the scene's script creates are keyed by their selector.
+  - Values are in CSS units: opacity 0..1, scale 1 = normal size. The inspector shows those two as percentages.
+  - The runtime plays them on top of `render(t)`. Position, scale and rotation use the separate CSS `translate`, `scale` and `rotate` properties, which combine with the transform a scene's code sets, and opacity multiplies with the scene's own.
+  - Claude now writes simple motion as keyframes in the scenes it builds or edits, so they open ready to adjust here.
+- **Retype text in the preview**: double-click text to retype it in place (Enter saves, Esc cancels).
+  - Text written in the scene's markup changes directly.
+  - Text the scene's script sets is changed where it appears once in the code; otherwise Bower suggests asking Claude.
+  - SVG text is picked instead, and retyped in the panel. The Scene tab's Text list has every piece of markup text too.
+- **Settings** (Scene tab): scenes can expose values worth tweaking (colours, sizes, amounts, copy the script builds) as `params` in the meta block, read with `VE.param(name)`.
+  - The panel shows them as text fields, colour pickers, sliders, switches and menus, and the preview updates as you change them.
+  - Colour and number params are also CSS variables (`--ve-<name>`).
+  - Claude adds them when it builds scenes; for older scenes, **Ask Claude to add settings**.
+- **Timing in code** (Scene tab): every `VE.progress(t, start, duration, ease)` with plain numbers (or `VE.duration - n`, or `VE.stagger(i, step, start)`) is a bar on a small timeline.
+  - Drag a bar to move it, an edge to resize it, and the end marker to change the scene's length.
+  - Click a name for exact numbers and the easing.
+- **Code**: the Code button opens the scene file in an editor with a live preview of the code. Apply (Ctrl+S) puts it into the scene's unsaved changes.
+  - A bar jumps to the file's settings and keyframes, style, markup and scripts. **Show in code** (on a picked layer) opens it at that element.
+  - Typing `VE.` lists the scene helpers.
+  - **Format** (Shift+Alt+F) tidies the file with Prettier.
+  - An error in the preview is marked on its line, with a button to go there.
 - **Ask Claude about this**: pick an element, then hand it to the chat. Claude gets its selector and markup, so "make this bigger" needs no description.
 - **Brand variables**: the brand kit is available to scenes as CSS variables (`--brand-<colour name>`, `--brand-1`..., `--brand-font-heading`, `--brand-font-body`), so scenes that use them follow the kit when it changes. Scenes written before this keep their own colour values until Claude updates them.
 

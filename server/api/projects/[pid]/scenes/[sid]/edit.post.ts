@@ -1,8 +1,10 @@
 import type { TimingStart } from '../../../../../utils/sceneSource'
+import { cleanTrackProp, validTrackKey } from '#shared/utils/tracks'
 
 // Every change made by hand in the editor goes through here: retyped text, scene settings (params), animation
-// timings and the code editor. Each one is saved as a version labelled "By hand: ..." so Undo, History and Claude
-// see it. `base` is the hash of the source the editor worked from; an edit against an older file is refused.
+// timings, the scene's length and the code editor. Changes collect in the scene's draft (drafts.ts) until the user
+// saves them as one version labelled "By hand: ...". `base` is the hash of the source the editor worked from; an
+// edit against an older one is refused.
 type Body =
   | { op: 'text', base?: string, i: number, before: string, text: string }
   | { op: 'codeText', base?: string, before: string, text: string }
@@ -10,6 +12,10 @@ type Body =
   | { op: 'timing', base: string, offset: number, match: string, start: TimingStart, dur: number, ease: string | null }
   | { op: 'source', base: string, html: string }
   | { op: 'duration', base?: string, ms: number }
+  // Keyframes or values for one element: `key` when it already has tracks, else `index` (an element of the markup,
+  // which gets a data-ve-id) or `selector` (one the scene's script creates). A null property removes it.
+  | { op: 'track', base?: string, key?: string, index?: number | null, selector?: string, props: Record<string, unknown>, label?: string }
+  | { op: 'name', base?: string, index: number, name: string }
 
 const clip = (s: string, n = 40) => {
   const t = s.replace(/\s+/g, ' ').trim()
@@ -26,7 +32,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 409, message: 'Claude is working on this scene. Edit it when it has finished.' })
   }
   const body = await readBody<Body>(event)
-  const html = await readScene(p.id, sid)
+  const html = await editableSource(p.id, sid)
   if (body.base && body.base !== sourceHash(html)) throw createError({ statusCode: 409, message: 'The scene changed since you opened it. Your view has been refreshed, so try again.' })
 
   let next: string
@@ -67,16 +73,42 @@ export default defineEventHandler(async (event) => {
     if (!Number.isFinite(ms) || ms < 100 || ms > 600_000) throw createError({ statusCode: 422, message: 'Invalid length' })
     next = withDuration(html, ms)
     label = `By hand: length ${(ms / 1000).toFixed(2)}s`
+  } else if (body.op === 'track') {
+    let src = html
+    let key = typeof body.key === 'string' && validTrackKey(body.key) ? body.key : ''
+    if (!key && Number.isInteger(body.index)) {
+      key = elementAttr(src, body.index!, 'data-ve-id') ?? ''
+      if (!key) {
+        const taken = layerIds(src)
+        do key = `l${Math.random().toString(36).slice(2, 7)}`; while (taken.has(key))
+        src = setElementAttr(src, body.index!, 'data-ve-id', key)
+      }
+    }
+    if (!key && typeof body.selector === 'string' && body.selector.trim()) key = `css:${body.selector.trim().slice(0, 300)}`
+    if (!key || !validTrackKey(key)) throw createError({ statusCode: 422, message: 'Pick an element first.' })
+    if (!body.props || typeof body.props !== 'object') throw createError({ statusCode: 422, message: 'Nothing to change.' })
+    const tracks = sceneMeta(src).tracks
+    const props = { ...tracks[key]?.props }
+    for (const [name, v] of Object.entries(body.props)) {
+      if (v === null) { delete props[name]; continue }
+      const c = cleanTrackProp(name, v)
+      if (c === undefined) throw createError({ statusCode: 422, message: `Not a valid value for ${name}.` })
+      props[name] = c
+    }
+    if (Object.keys(props).length) tracks[key] = { props }
+    else delete tracks[key]
+    next = withMeta(src, { tracks: Object.keys(tracks).length ? tracks : null })
+    const what = clip(String(body.label ?? '') || 'an element', 30)
+    const changed = Object.entries(body.props).map(([n, v]) => v === null ? `no ${n}` : Array.isArray(v) ? `${n} keyframes` : n)
+    label = `By hand: ${what} ${changed.join(', ')}`
+  } else if (body.op === 'name') {
+    const name = String(body.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+    next = setElementAttr(html, Number(body.index), 'data-ve-name', name || null)
+    label = `By hand: layer named "${clip(name || 'unnamed')}"`
   } else {
     throw createError({ statusCode: 422, message: 'Unknown edit' })
   }
 
-  if (next === html) return { project: await projectView(p.id), hash: sourceHash(html) }
-  const idx = await getVersions(p.id, sid)
-  if (!idx.items.length) await addVersion(p.id, sid, html, 'Before')
-  await writeScene(p.id, sid, next)
-  await addVersion(p.id, sid, next, label)
-  // The voice clip and CLAUDE.md follow the scene (a changed duration moves the scenes after it).
-  await saveProject(p)
+  if (next !== html) await addToDraft(p.id, sid, html, next, label)
   return { project: await projectView(p.id), hash: sourceHash(next) }
 })

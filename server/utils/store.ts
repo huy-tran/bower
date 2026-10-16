@@ -2,6 +2,8 @@ import { promises as fs, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { writeClaudeMd } from './claudeMd'
+import { draftViews, removeDraft } from './drafts'
+import { cleanTracks, type Tracks } from '#shared/utils/tracks'
 
 import { getApp, migrateLegacyApp } from './apps'
 import { STORAGE } from './paths'
@@ -246,14 +248,14 @@ function parseVoice(v: unknown): SceneVoice | null {
   return out
 }
 
-export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string, app: AppMode | null, params: SceneParam[] } {
+export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string, app: AppMode | null, params: SceneParam[], tracks: Tracks } {
   const m = html.match(META_RE)
   try {
     const d = m ? JSON.parse(m[1]!) : {}
     const app = APP_MODES.includes(d.app) ? d.app as AppMode : null
-    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000), app, params: parseParams(d.params) }
+    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000), app, params: parseParams(d.params), tracks: cleanTracks(d.tracks) }
   } catch {
-    return { duration: 3000, voice: null, brief: '', app: null, params: [] }
+    return { duration: 3000, voice: null, brief: '', app: null, params: [], tracks: {} }
   }
 }
 
@@ -373,7 +375,9 @@ export async function projectView(pid: string) {
   const p = await loadProject(pid)
   const scenes = await sceneViews(p)
   const versions = Object.fromEntries(await Promise.all(scenes.map(async s => [s.id, (await getVersions(pid, s.id)).items.length])))
-  return { ...p, path: projectDir(pid), scenes, versions, duration: scenes.reduce((a, s) => a + s.duration, 0) }
+  // Unsaved hand edits, which the editor's preview shows in place of the saved scene.
+  const drafts = await draftViews(pid, scenes.map(s => s.id))
+  return { ...p, path: projectDir(pid), scenes, versions, drafts, duration: scenes.reduce((a, s) => a + s.duration, 0) }
 }
 
 export function newSceneId(title: string) {
@@ -457,6 +461,7 @@ export async function removeSceneData(pid: string, sid: string) {
   await fs.rm(sceneFile(pid, sid), { force: true })
   await fs.rm(join(metaDir(pid), 'versions', sid), { recursive: true, force: true })
   await fs.rm(chatFile(pid, sid), { force: true })
+  await removeDraft(pid, sid)
 }
 
 // Chats: 'project' is the whole-project thread, anything else is a scene id.

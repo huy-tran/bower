@@ -1,7 +1,12 @@
+import { easeFn, sampleTrack } from '#shared/utils/tracks'
+
 // Client-side runtime injected into every scene frame. Scenes are pure functions of time:
 // the editor, thumbnails and the renderer all drive them through VE.seek(t).
 export const SCENE_RUNTIME = String.raw`
 (function () {
+  // Keyframes from the meta block's "tracks" (shared/utils/tracks.ts), played on top of render(t).
+  var trackEase = ${easeFn.toString()};
+  var trackSample = ${sampleTrack.toString()};
   var ctx = window.__VE_CTX || {};
   var W = ctx.width || 1920, H = ctx.height || 1080;
 
@@ -72,6 +77,57 @@ export const SCENE_RUNTIME = String.raw`
     var p = (readMeta().params || {})[name];
     return p && typeof p === 'object' ? p.value : undefined;
   }
+  // Tracks: the saved ones, or ones the editor is previewing. Every style a track sets is put back as it was before
+  // the next render(t), so render(t) always starts from the scene's own state and tracks land on top of it.
+  var liveTracks = null, touched = [];
+  function trackTarget(key) {
+    stage = stage || document.getElementById('stage');
+    if (!stage) return null;
+    try { return key.indexOf('css:') === 0 ? stage.querySelector(key.slice(4)) : stage.querySelector('[data-ve-id="' + key + '"]'); } catch (e) { return null; }
+  }
+  function restoreTracks() {
+    for (var i = touched.length - 1; i >= 0; i--) {
+      var r = touched[i];
+      if (r.css === '#text') r.el.textContent = r.v;
+      else if (r.v) r.el.style.setProperty(r.css, r.v, r.p); else r.el.style.removeProperty(r.css);
+    }
+    touched = [];
+  }
+  function applyTracks(t) {
+    var all = liveTracks || readMeta().tracks || {};
+    Object.keys(all).forEach(function (key) {
+      var layer = all[key] || {}, el = trackTarget(key), props = layer.props && typeof layer.props === 'object' ? layer.props : layer;
+      if (!el) return;
+      var v = function (n) { return props[n] === undefined ? undefined : trackSample(props[n], t, trackEase); };
+      var set = function (css, val) {
+        touched.push({ el: el, css: css, v: el.style.getPropertyValue(css), p: el.style.getPropertyPriority(css) });
+        el.style.setProperty(css, val);
+      };
+      var x = v('x'), y = v('y'), s = v('scale'), r = v('rotate'), o = v('opacity'), b = v('blur'), ty = v('typed');
+      if (x !== undefined || y !== undefined) set('translate', (+x || 0) + 'px ' + (+y || 0) + 'px');
+      if (s !== undefined) set('scale', String(+s));
+      if (r !== undefined) set('rotate', (+r) + 'deg');
+      if (o !== undefined) {
+        var base = parseFloat(el.style.opacity);
+        if (isNaN(base)) base = parseFloat(getComputedStyle(el).opacity);
+        set('opacity', String((isNaN(base) ? 1 : base) * Math.max(0, Math.min(1, +o))));
+      }
+      if (b !== undefined && +b > 0) { var f = el.style.filter; set('filter', (f && f !== 'none' ? f + ' ' : '') + 'blur(' + (+b) + 'px)'); }
+      var c = v('color'); if (c !== undefined) set('color', String(c));
+      var bg = v('background'); if (bg !== undefined) set('background-color', String(bg));
+      var fs = v('fontSize'); if (fs !== undefined) set('font-size', (+fs) + 'px');
+      var ls = v('letterSpacing'); if (ls !== undefined) set('letter-spacing', (+ls) + 'em');
+      var rd = v('radius'); if (rd !== undefined) set('border-radius', (+rd) + 'px');
+      if (v('hidden') === true) set('visibility', 'hidden');
+      // Typed: the first part of the element's text, as if being typed (plain-text elements only).
+      if (ty !== undefined && !el.children.length) {
+        var full = el.textContent;
+        touched.push({ el: el, css: '#text', v: full });
+        el.textContent = full.slice(0, Math.round(full.length * Math.max(0, Math.min(1, +ty))));
+      }
+    });
+  }
+
   // Colour and number params are also CSS variables on the stage (--ve-accent), so styles can use them directly.
   function applyParamVars() {
     stage = stage || document.getElementById('stage');
@@ -94,6 +150,12 @@ export const SCENE_RUNTIME = String.raw`
     if (!stage) return;
     var s = Math.min(innerWidth / W, innerHeight / H);
     stage.style.transform = 'translate(' + (innerWidth - W * s) / 2 + 'px,' + (innerHeight - H * s) / 2 + 'px) scale(' + s + ')';
+  }
+
+  // The document line an error was thrown on (the code editor marks it), from the stack of a script in this page.
+  function errorLine(e) {
+    var m = /(?:about:srcdoc|\/frame[^\s:)]*):(\d+):\d+/.exec(String(e && e.stack || ''));
+    return m ? +m[1] : null;
   }
 
   function report(type, data) {
@@ -272,13 +334,15 @@ export const SCENE_RUNTIME = String.raw`
       // Until live UI snapshots are in, render(t) would find nothing to animate: wait for them first.
       if (!uiDone) return uiReady.then(function () { return VE.seek(cur); });
       try {
+        restoreTracks();
         if (def && def.render) def.render(t, VE);
+        applyTracks(t);
         document.getAnimations().forEach(function (a) { a.pause(); a.currentTime = t; });
         // Animations inside live UI snapshots (an app's spinners, say) live in shadow roots, which document.getAnimations()
         // does not see.
         document.querySelectorAll('ve-ui').forEach(function (h) { if (h.shadowRoot) h.shadowRoot.getAnimations().forEach(function (a) { a.pause(); a.currentTime = t; }); });
       } catch (e) {
-        report('error', { message: String(e && e.message || e) });
+        report('error', { message: String(e && e.message || e), line: errorLine(e) });
         throw e;
       }
       return syncClips(t);
@@ -293,9 +357,14 @@ export const SCENE_RUNTIME = String.raw`
   window.VE = VE;
   window.__seek = function (t) { return settled(t).then(function () { return true; }); };
 
-  window.addEventListener('error', function (e) { report('error', { message: e.message }); });
+  window.addEventListener('error', function (e) { report('error', { message: e.message, line: e.lineno || errorLine(e.error) }); });
   window.addEventListener('message', function (e) {
     var d = e.data;
+    if (d && d.__ve && d.type === 'tracks') {
+      liveTracks = d.tracks || null;
+      Promise.resolve(VE.seek(cur)).catch(function () {});
+      return;
+    }
     if (d && d.__ve && d.type === 'params') {
       overrides = d.values || {};
       applyParamVars();

@@ -1,4 +1,4 @@
-<script type="application/json" id="meta">{"duration": 2600, "params": {"headline": {"type": "text", "value": "Meet Acme", "label": "Headline"}, "ink": {"type": "color", "value": "#0a0a0a", "label": "Headline colour"}, "lift": {"type": "number", "value": 90, "min": 0, "max": 200, "step": 5, "unit": "px", "label": "Letter rise"}}}</script>
+<script type="application/json" id="meta">{"duration": 2600, "tracks": {"tagline": {"props": {"opacity": [[800, 0], [1500, 1, "outQuint"], [2150, 1], [2600, 0, "inCubic"]], "y": [[800, 24], [1500, 0, "outQuint"]]}}}, "params": {"headline": {"type": "text", "value": "Meet Acme", "label": "Headline"}, "ink": {"type": "color", "value": "#0a0a0a", "label": "Headline colour"}, "lift": {"type": "number", "value": 90, "min": 0, "max": 200, "step": 5, "unit": "px", "label": "Letter rise"}}}</script>
 <style>
   .intro-word {
     position: absolute; left: 0; right: 0; top: 380px; text-align: center;
@@ -11,10 +11,9 @@
   }
 </style>
 <div class="intro-word" data-ve-param="headline"></div>
-<div class="intro-tag">A UI kit for calm, careful interfaces</div>
+<div class="intro-tag" data-ve-id="tagline" data-ve-name="Tagline">A UI kit for calm, careful interfaces</div>
 <script>
   const word = VE.$('.intro-word')
-  const tag = VE.$('.intro-tag')
 
   // One span per letter of the headline, rebuilt when the headline setting changes.
   let built = null, letters = []
@@ -39,16 +38,13 @@
         el.style.opacity = p
         el.style.transform = 'translateY(' + (1 - p) * lift + 'px) rotate(' + (1 - p) * 6 + 'deg)'
       })
-      const tp = VE.progress(t, 800, 700, 'outQuint')
-      tag.style.opacity = tp
-      tag.style.transform = 'translateY(' + (1 - tp) * 24 + 'px)'
+      // The tagline moves with keyframes ("tracks" in the meta block), so it can be retimed in the editor.
 
       // Lift out towards the next scene.
       const out = VE.progress(t, 2150, 450, 'inCubic')
       word.style.transform = 'translateY(' + (-out * 60) + 'px)'
       word.style.filter = 'blur(' + out * 10 + 'px)'
       word.style.opacity = 1 - out
-      tag.style.opacity = tp * (1 - out)
     }
   })
 </script>

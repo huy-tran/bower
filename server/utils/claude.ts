@@ -6,7 +6,8 @@ import { trackClaudeEvent } from './usage'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { addVersion, allCodebases, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneFile, sceneViews, writeScene, type AppMode, type Project, type SceneView } from './store'
+import { getDraft } from './drafts'
+import { addVersion, allCodebases, blankScene, getChat, getVersions, loadProject, projectDir, saveChat, saveProject, sceneBeats, sceneMeta, sceneFile, sceneViews, writeScene, type AppMode, type Project, type SceneView } from './store'
 
 export interface ChatJob {
   status: 'running' | 'done' | 'error'
@@ -47,6 +48,15 @@ async function handEditsSince(pid: string, sceneIds: string[], since: string) {
 function handEditsLine(opts: ChatOptions) {
   if (!opts.handEdits?.length) return ''
   return `Since your last reply the user changed this by hand in the editor: ${opts.handEdits.join('; ')}. The file on disk is the truth, so Read it again before editing, and keep those changes unless the request undoes them.`
+}
+
+// Which elements have keyframes (the meta block's "tracks"), so Claude keeps them and knows they move.
+function tracksLine(html: string) {
+  const tracks = sceneMeta(html).tracks
+  const keys = Object.keys(tracks)
+  if (!keys.length) return ''
+  const list = keys.slice(0, 15).map(k => `${k.startsWith('css:') ? `\`${k.slice(4)}\`` : `[data-ve-id="${k}"]`} (${Object.entries(tracks[k]!.props).map(([n, v]) => Array.isArray(v) ? `${n} keyframed` : n).join(', ')})`)
+  return `Keyframes in the meta block's "tracks" animate these elements on top of render(t): ${list.join('; ')}. Keep them and their data-ve-id attributes unless the request changes that motion (see "Keyframes" in CLAUDE.md; values are CSS units, so opacity is 0..1 and scale 1 is normal size).`
 }
 
 function targetLine(opts: ChatOptions) {
@@ -120,6 +130,7 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
     appLine(p, s),
     opts.at !== undefined ? `The user's playhead is at ${Math.round(opts.at)}ms in this scene; "here" or "this moment" means that time.` : '',
     targetLine(opts),
+    tracksLine(await fs.readFile(s.path, 'utf8').catch(() => '')),
     s.params.length ? `Settings the user can change in the editor (the "params" key in the meta block, read with VE.param): ${s.params.map(x => `${x.name} = ${JSON.stringify(x.value)}`).join(', ')}. Keep them working; add one when the request makes a value worth tweaking.` : '',
     handEditsLine(opts),
     codebaseLine(p),
@@ -231,6 +242,12 @@ export async function startChat(pid: string, key: string, message: string, opts:
   const bin = await requireClaude()
 
   const project = await loadProject(pid)
+  // Claude works on the saved files, so unsaved hand edits would no longer apply after its run.
+  const unsaved: string[] = []
+  for (const s of project.scenes) if ((key === 'project' || key === s.id) && await getDraft(pid, s.id)) unsaved.push(s.title)
+  if (unsaved.length) {
+    throw createError({ statusCode: 409, message: `${key === 'project' ? `${unsaved.map(t => `"${t}"`).join(', ')} ${unsaved.length > 1 ? 'have' : 'has'}` : 'This scene has'} unsaved hand edits. Save or discard them in Edit by hand first.` })
+  }
   await saveProject(project) // refresh CLAUDE.md and bower.mjs with the latest settings
   const attachments = (opts.attachments ?? []).filter(a => /^assets\/(shots\/)?[\w.-]+$/.test(a)).slice(0, 8)
   // The model picked for this message, else the project's for this kind of work, else the Bower settings default.
