@@ -27,6 +27,32 @@ export interface ChatOptions {
   size?: RequestSize
   attachments?: string[]
   at?: number
+  // An element the user picked in the preview: "this", "it" in the request means it.
+  target?: { selector: string, text?: string, html?: string }
+  // Hand edits made in the editor since Claude last worked on this chat (filled in by startChat).
+  handEdits?: string[]
+}
+
+// Changes the user made by hand (versions labelled "By hand: ...") since `since`, newest last.
+async function handEditsSince(pid: string, sceneIds: string[], since: string) {
+  const out: { at: string, line: string }[] = []
+  for (const sid of sceneIds) {
+    for (const v of (await getVersions(pid, sid)).items) {
+      if (v.label.startsWith('By hand') && v.at > since) out.push({ at: v.at, line: `${sceneIds.length > 1 ? `\`${sid}\`: ` : ''}${v.label.replace(/^By hand:\s*/, '')}` })
+    }
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at)).slice(-12).map(x => x.line)
+}
+
+function handEditsLine(opts: ChatOptions) {
+  if (!opts.handEdits?.length) return ''
+  return `Since your last reply the user changed this by hand in the editor: ${opts.handEdits.join('; ')}. The file on disk is the truth, so Read it again before editing, and keep those changes unless the request undoes them.`
+}
+
+function targetLine(opts: ChatOptions) {
+  const t = opts.target
+  if (!t?.selector) return ''
+  return `The user picked this element in the preview, so "this", "it" or "here" means it: \`${t.selector}\`${t.text ? ` showing "${t.text}"` : ''}${t.html ? `. Its markup starts: ${t.html}` : ''}. It may have been created by the scene's script rather than written in the markup.`
 }
 
 const jobs = new Map<string, ChatJob>()
@@ -93,6 +119,9 @@ async function sceneContext(p: Project, sid: string, opts: ChatOptions) {
     s.brief ? `Storyboard brief for this scene (the "brief" key in the meta block): "${s.brief}". Keep the key; update it only if the user changes what the scene is about.` : '',
     appLine(p, s),
     opts.at !== undefined ? `The user's playhead is at ${Math.round(opts.at)}ms in this scene; "here" or "this moment" means that time.` : '',
+    targetLine(opts),
+    s.params.length ? `Settings the user can change in the editor (the "params" key in the meta block, read with VE.param): ${s.params.map(x => `${x.name} = ${JSON.stringify(x.value)}`).join(', ')}. Keep them working; add one when the request makes a value worth tweaking.` : '',
+    handEditsLine(opts),
     codebaseLine(p),
     '',
     `Follow the scene contract in CLAUDE.md. Read \`${s.file}\` first. Only edit \`${s.file}\` unless the request clearly asks for changes to other scenes.`,
@@ -119,6 +148,7 @@ async function projectContext(p: Project, opts: ChatOptions) {
     ...views.map((s, i) => `${i + 1}. "${s.title}" (id \`${s.id}\`) - \`${s.file}\` - ${s.duration}ms, starts at ${fmt(s.start)}${s.transition ? `, ${s.transition.type} transition in` : ''}${s.brief ? ` - brief: "${s.brief.length > 120 ? s.brief.slice(0, 120) + '…' : s.brief}"` : ''}${s.voice ? ` - voice-over: "${s.voice.text.length > 90 ? s.voice.text.slice(0, 90) + '…' : s.voice.text}"` : ''}`),
     p.audio?.bpm ? `Music: ${Math.round(p.audio.bpm * 10) / 10} BPM. Scenes can read beat times via VE.beats / VE.downbeats / VE.phrases and sections via VE.sections.` : 'No music track is loaded.',
     'Voice-over: each scene\'s script is the "voice" key of its meta block; the editor generates the speech (see "Voice-over" in CLAUDE.md).',
+    handEditsLine(opts),
     codebaseLine(p),
     appLine(p),
     '',
@@ -207,6 +237,10 @@ export async function startChat(pid: string, key: string, message: string, opts:
   let model = await pickModel(opts.task ?? 'chat', project, opts.model)
   let context: string
   const sized: string[] = []
+  const chat = await getChat(pid, key)
+  // A new chat reads the files afresh anyway; an ongoing one may remember them as they were before the hand edits.
+  const lastAt = chat.messages.at(-1)?.at
+  if (lastAt) opts = { ...opts, handEdits: await handEditsSince(pid, key === 'project' ? project.scenes.map(s => s.id) : [key], lastAt) }
   // Hold the job slot while Haiku sizes the request, so a second message cannot start alongside.
   if (model === AUTO) jobs.set(k, { status: 'running', prompt: message, startedAt: Date.now(), activity: ['Choosing a model…'], partial: '' })
   try {
@@ -223,8 +257,7 @@ export async function startChat(pid: string, key: string, message: string, opts:
     throw e
   }
 
-  const chat = await getChat(pid, key)
-  const fresh = !!chat.sessionId && (chat.sessionTurns ?? 0) >= SESSION_TURNS
+  const fresh =!!chat.sessionId && (chat.sessionTurns ?? 0) >= SESSION_TURNS
   const resume = fresh ? null : chat.sessionId
   const turns = resume ? chat.sessionTurns ?? 0 : 0
   const recent = chat.messages.filter(m => m.role === 'user').slice(-3).map(m => `- ${m.text.length > 300 ? m.text.slice(0, 300) + '…' : m.text}`)

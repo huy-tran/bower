@@ -14,6 +14,20 @@ export interface SceneView {
   voice: { text: string, voice?: string, speed?: number } | null
   brief: string
   app: 'shots' | 'rebuild' | 'auto' | null
+  // Settings people change without Claude ("params" in the scene's meta block).
+  params: SceneParam[]
+}
+
+export interface SceneParam {
+  name: string
+  type: 'text' | 'color' | 'number' | 'boolean' | 'select'
+  value: string | number | boolean
+  label: string
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+  options?: string[]
 }
 
 export interface Section { start: number, end: number, label: string, energy: number }

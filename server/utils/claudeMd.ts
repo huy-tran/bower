@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { projectBrand, type BrandKit } from './brand'
+import { brandColorVars } from './frame'
 import { STORAGE } from './paths'
 import { allCodebases, type Project } from './store'
 
@@ -97,6 +98,13 @@ function brandSection(p: Project, kit: BrandKit) {
     lines.push('Colours:', ...kit.colors.map(c => `- ${c.name || 'Colour'}: ${c.hex}`), '')
   }
   lines.push(`Fonts: headings in "${kit.fonts.heading}", body text in "${kit.fonts.body}". Both are already loaded on the stage (Google Fonts).`, '')
+  const vars = brandColorVars(kit).map((v, i) => `${code(`var(${v})`)} (${kit.colors[i]!.name || 'colour'})`)
+  lines.push(
+    'Use the kit through CSS variables on the stage rather than copying its values, so the scenes follow the kit when it changes:',
+    `${vars.length ? `colours ${vars.join(', ')} (also \`--brand-1\`, \`--brand-2\`... in kit order); ` : ''}fonts \`var(--brand-font-heading)\` and \`var(--brand-font-body)\`.`,
+    'In a script, read a colour with `getComputedStyle(document.getElementById(\'stage\')).getPropertyValue(\'--brand-1\')`.',
+    ''
+  )
   if (kit.files.length) {
     lines.push('Logos and brand images (Read them to see them):')
     lines.push(...kit.files.map(f => `- ${f.label}: ${code(`brand/${f.name}`)} - in a scene: ${code(`/api/projects/${p.id}/files/brand/${f.name}`)}`), '')
@@ -285,7 +293,8 @@ A scene file is an HTML fragment that is placed inside a fixed ${p.width}x${p.he
    \`<script type="application/json" id="meta">{"duration": 3320}</script>\` - duration in milliseconds.
    Change this number when the user asks for the scene to be longer or shorter. It may also hold a \`voice\` key
    with the scene's voice-over script (see "Voice-over" below) and a \`brief\` key: what the scene should show,
-   from the storyboard. A scene whose body is still the placeholder headline has not been built yet: build it
+   from the storyboard, and a \`params\` key: settings people can change in the editor (see "Settings people can
+   change" below). A scene whose body is still the placeholder headline has not been built yet: build it
    from its brief.
 2. Markup and \`<style>\` for the scene. Position things absolutely in stage pixels (${p.width}x${p.height}).
    Scope CSS with class names; never style \`html\`, \`body\` or \`#stage\` sizing.
@@ -312,6 +321,7 @@ It is called for arbitrary times in any order (scrubbing, thumbnails, frame-by-f
   \`VE.beat(n)\`, \`VE.downbeat(n)\`, \`VE.snap(ms, 'beats' | 'downbeats' | 'phrases')\` - nearest grid time.
 - \`VE.sections\` - music sections overlapping the scene: \`[{ label, energy, start, end }]\` (intro, build, drop, breakdown, outro...).
 - \`VE.duration\`, \`VE.width\`, \`VE.height\`, \`VE.$(sel)\`, \`VE.$$(sel)\`.
+- \`VE.param(name, fallback)\` - a setting from the meta block's \`params\` (see "Settings people can change").
 
 Example:
 
@@ -333,6 +343,39 @@ Example:
   })
 </script>
 \`\`\`
+
+## Settings people can change
+
+People also edit scenes by hand in the editor, without asking you. Write every scene so that works:
+
+- **Text in the markup.** Put visible copy as plain text inside an element (\`<div class="title">Every part in its place</div>\`),
+  not built by the script, so it can be retyped in the preview. Keep each piece of copy in its own element with no child elements.
+- **Plain-number timings.** Write \`VE.progress(t, 300, 900, 'outExpo')\` with literal numbers for start and duration
+  (\`VE.duration - 400\` and \`VE.stagger(i, 60, 200)\` are fine too). The editor shows these as bars on a timeline that
+  people drag, so keep the numbers literal rather than computed from variables, and keep one call per animation.
+- **Params for the values worth tweaking.** Expose the scene's key colours, sizes, amounts and any copy the script
+  uses (typed text, labels built in a loop) in the meta block, and read them with \`VE.param\`:
+
+  \`\`\`html
+  <script type="application/json" id="meta">{"duration": 3000, "params": {
+    "headline": {"type": "text", "value": "Meet Acme", "label": "Headline"},
+    "accent": {"type": "color", "value": "#2563eb", "label": "Accent"},
+    "tilt": {"type": "number", "value": 52, "min": 0, "max": 80, "step": 1, "unit": "deg", "label": "Tilt"},
+    "grid": {"type": "boolean", "value": true, "label": "Show grid"},
+    "align": {"type": "select", "value": "center", "options": ["left", "center", "right"], "label": "Alignment"}
+  }}</script>
+  \`\`\`
+
+  - Types: \`text\`, \`color\`, \`number\` (with \`min\`, \`max\`, \`step\`, \`unit\`), \`boolean\`, \`select\` (with \`options\`). Give each a short \`label\`.
+  - Read params **inside \`render(t)\`** (\`VE.param('tilt', 52)\`), not once at the top of the script: the editor previews a new
+    value live by re-rendering, without reloading the scene.
+  - Colour and number params are also CSS variables on the stage: \`color: var(--ve-accent)\`, \`calc(var(--ve-size) * 1px)\`.
+  - \`<div data-ve-param="headline"></div>\` shows a text param without any script. For text the script splits up (one span per
+    letter), read \`VE.param('headline')\` and set \`data-ve-param="headline"\` on the container so a double-click in the preview
+    opens that setting.
+  - Two to six params is plenty. Expose what someone would plausibly change, not every number. Never rename or remove a
+    param unless asked, and keep its \`value\` when you edit the file: it may have been set by hand.
+- **Hand edits win.** When the prompt says the user changed something by hand, keep it unless the request undoes it.
 
 ## Cuts between scenes
 

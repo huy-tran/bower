@@ -9,7 +9,8 @@ export interface ChatMessage {
 }
 export interface ChatJob { status: 'running' | 'done' | 'error', prompt: string, startedAt: number, activity: string[], partial: string }
 // `task: 'build'` marks a whole-scene build (storyboard), which uses the project's model for building.
-export interface SendOptions { model?: string, task?: 'chat' | 'build', attachments?: string[], at?: number }
+// `target`: an element the user picked in the preview, which "this" in the message refers to.
+export interface SendOptions { model?: string, task?: 'chat' | 'build', attachments?: string[], at?: number, target?: { selector: string, text?: string, html?: string } }
 interface Thread { messages: ChatMessage[], job: ChatJob | null, loaded: boolean }
 
 const threads = reactive(new Map<string, Thread>())

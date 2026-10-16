@@ -118,6 +118,8 @@ export interface SceneView {
   brief: string
   // This scene's override of the project's app mode ("app" in the meta block), or null for the project default.
   app: AppMode | null
+  // Settings people can change without Claude ("params" in the meta block).
+  params: SceneParam[]
 }
 
 export interface Version { n: number, at: string, label: string }
@@ -244,15 +246,68 @@ function parseVoice(v: unknown): SceneVoice | null {
   return out
 }
 
-export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string, app: AppMode | null } {
+export function sceneMeta(html: string): { duration: number, voice: SceneVoice | null, brief: string, app: AppMode | null, params: SceneParam[] } {
   const m = html.match(META_RE)
   try {
     const d = m ? JSON.parse(m[1]!) : {}
     const app = APP_MODES.includes(d.app) ? d.app as AppMode : null
-    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000), app }
+    return { duration: Math.max(100, Number(d.duration) || 3000), voice: parseVoice(d.voice), brief: String(d.brief ?? '').trim().slice(0, 1000), app, params: parseParams(d.params) }
   } catch {
-    return { duration: 3000, voice: null, brief: '', app: null }
+    return { duration: 3000, voice: null, brief: '', app: null, params: [] }
   }
+}
+
+// Settings a scene exposes for people to change without Claude ("params" in the meta block), read in the scene
+// with VE.param(name): { "accent": { "type": "color", "value": "#2563eb", "label": "Accent" }, ... }.
+export type SceneParamType = 'text' | 'color' | 'number' | 'boolean' | 'select'
+export interface SceneParam {
+  name: string
+  type: SceneParamType
+  value: string | number | boolean
+  label: string
+  min?: number
+  max?: number
+  step?: number
+  unit?: string
+  options?: string[]
+}
+const PARAM_TYPES: SceneParamType[] = ['text', 'color', 'number', 'boolean', 'select']
+export const PARAM_NAME = /^[a-zA-Z][\w-]{0,40}$/
+
+function parseParams(v: unknown): SceneParam[] {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return []
+  const out: SceneParam[] = []
+  for (const [name, raw] of Object.entries(v as Record<string, any>).slice(0, 40)) {
+    if (!PARAM_NAME.test(name) || !raw || typeof raw !== 'object') continue
+    const type: SceneParamType = PARAM_TYPES.includes(raw.type) ? raw.type : typeof raw.value === 'number' ? 'number' : typeof raw.value === 'boolean' ? 'boolean' : 'text'
+    const label = String(raw.label ?? '').trim().slice(0, 60) || name.replace(/[-_]/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
+    const p: SceneParam = { name, type, label, value: '' }
+    const num = (x: unknown) => Number.isFinite(Number(x)) && x !== null && x !== '' ? Number(x) : undefined
+    if (type === 'number') {
+      p.min = num(raw.min); p.max = num(raw.max); p.step = num(raw.step)
+      if (typeof raw.unit === 'string') p.unit = raw.unit.slice(0, 8)
+    }
+    if (type === 'select') p.options = Array.isArray(raw.options) ? raw.options.map(String).slice(0, 30) : []
+    p.value = cleanParamValue(p, raw.value)
+    out.push(p)
+  }
+  return out
+}
+
+// A value for a param, coerced to its type; numbers stay inside min and max.
+export function cleanParamValue(p: Pick<SceneParam, 'type' | 'min' | 'max' | 'options'>, v: unknown): string | number | boolean {
+  if (p.type === 'number') {
+    let n = Number(v)
+    if (!Number.isFinite(n)) n = p.min ?? 0
+    if (p.min !== undefined) n = Math.max(p.min, n)
+    if (p.max !== undefined) n = Math.min(p.max, n)
+    return n
+  }
+  if (p.type === 'boolean') return v === true || v === 'true'
+  const s = String(v ?? '').slice(0, 2000)
+  if (p.type === 'color') return /^#[0-9a-f]{3,8}$/i.test(s.trim()) || /^(rgb|hsl|oklch)a?\(/i.test(s.trim()) ? s.trim() : '#000000'
+  if (p.type === 'select') return p.options?.includes(s) ? s : p.options?.[0] ?? s
+  return s
 }
 
 // Sets keys in the meta block, keeping the others; a null value removes the key.
@@ -262,8 +317,25 @@ export function withMeta(html: string, patch: Record<string, unknown>) {
   try { rest = m ? JSON.parse(m[1]!) : {} } catch {}
   const next = { ...rest, ...patch }
   for (const k of Object.keys(next)) if (next[k] === null || next[k] === undefined) delete next[k]
-  const meta = `<script type="application/json" id="meta">${JSON.stringify(next)}</script>`
-  return m ? html.replace(META_RE, meta) : `${meta}\n${html}`
+  // `<` is escaped so text such as "</script>" in a voice script or a param cannot end the block early.
+  const meta = `<script type="application/json" id="meta">${JSON.stringify(next).replace(/</g, '\\u003c')}</script>`
+  // A function replacement, so `$&` or `$1` in the text is not read as a pattern.
+  return m ? html.replace(META_RE, () => meta) : `${meta}\n${html}`
+}
+
+// Sets param values in the meta block, leaving their type, label and limits as they are.
+export function withParamValues(html: string, values: Record<string, unknown>) {
+  const m = html.match(META_RE)
+  let d: Record<string, any> = {}
+  try { d = m ? JSON.parse(m[1]!) : {} } catch {}
+  const params = { ...d.params }
+  const known = new Map(parseParams(d.params).map(p => [p.name, p]))
+  for (const [name, v] of Object.entries(values)) {
+    const p = known.get(name)
+    if (!p) throw createError({ statusCode: 422, message: `This scene has no setting called "${name}".` })
+    params[name] = { ...params[name], value: cleanParamValue(p, v) }
+  }
+  return withMeta(html, { params })
 }
 
 export function withDuration(html: string, duration: number) {
@@ -284,14 +356,14 @@ export async function sceneViews(p: Project): Promise<SceneView[]> {
   const out: SceneView[] = []
   for (const s of p.scenes) {
     const path = sceneFile(p.id, s.id)
-    let duration = 3000, mtime = 0, voice: SceneVoice | null = null, brief = '', app: AppMode | null = null
+    let duration = 3000, mtime = 0, voice: SceneVoice | null = null, brief = '', app: AppMode | null = null, params: SceneParam[] = []
     try {
       const [html, stat] = await Promise.all([fs.readFile(path, 'utf8'), fs.stat(path)])
-      ;({ duration, voice, brief, app } = sceneMeta(html))
+      ;({ duration, voice, brief, app, params } = sceneMeta(html))
       mtime = stat.mtimeMs
     } catch {}
     const transition = out.length && s.transition && s.transition.type !== 'cut' ? s.transition : null
-    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime, transition, voice, brief, app })
+    out.push({ id: s.id, title: s.title, file: `scenes/${s.id}.html`, path, duration, start, mtime, transition, voice, brief, app, params })
     start += duration
   }
   return out

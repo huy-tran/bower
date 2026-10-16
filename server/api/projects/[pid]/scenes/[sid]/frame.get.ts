@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 
-// ?version=n serves an older version of the scene (for side-by-side compare); ?transparent=1 drops the white stage.
+// ?version=n serves an older version of the scene (for side-by-side compare); ?transparent=1 drops the white stage;
+// ?edit=1 numbers the elements for editing text in the preview.
 export default defineEventHandler(async (event) => {
   const p = await loadProject(getRouterParam(event, 'pid')!)
   const sid = assertId(getRouterParam(event, 'sid'))
@@ -19,5 +20,5 @@ export default defineEventHandler(async (event) => {
   }
   setHeader(event, 'Content-Type', 'text/html; charset=utf-8')
   setHeader(event, 'Cache-Control', 'no-store')
-  return buildFrame(p, s, html, { transparent: !!q.transparent })
+  return buildFrame(p, s, html, { transparent: !!q.transparent, edit: !!q.edit })
 })

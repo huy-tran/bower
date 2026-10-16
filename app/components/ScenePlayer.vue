@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ProjectView, SceneView, ScreenLayer } from '~/composables/useEditor'
+import { attachStageEditing } from '~/utils/stageEdit'
 
 const props = defineProps<{
   project: ProjectView
@@ -12,10 +13,41 @@ const props = defineProps<{
   fixable?: boolean
   // Serve a specific saved version instead of the current file (side-by-side compare).
   version?: number
+  // Edit by hand in the preview: pick elements and retype text (the editor's main preview, This scene only).
+  editable?: boolean
 }>()
 
 const chat = useChat()
 const toast = useToast()
+const edit = useSceneEdit()
+
+const srcFor = (s: SceneView) => frameUrl(props.project.id, s, undefined, props.version) + (props.editable ? '&edit=1' : '')
+
+// Hand editing inside each frame, attached when it loads (a reload has a new document).
+const editors = new Map<string, NonNullable<ReturnType<typeof attachStageEditing>>>()
+function onLoad(s: SceneView) {
+  editors.get(s.id)?.detach()
+  editors.delete(s.id)
+  const f = frames.get(s.id)
+  if (!props.editable || !f) return
+  edit.registerFrame(s.id, f)
+  const ed = attachStageEditing(f, s.id, {
+    pick: p => { edit.picked.value = p },
+    commit: (p, text) => edit.apply(props.project.id, s.id, p.index !== null ? { op: 'text', i: p.index, before: p.text, text } : { op: 'codeText', before: p.text, text }),
+    other: (p) => {
+      edit.picked.value = p
+      if (p.param) edit.focusParam.value = { name: p.param, n: Date.now() }
+      else toast.add({ title: 'Only plain text can be retyped here', description: 'This element holds more than text. Use the panel on the right, or ask Claude about it.', color: 'neutral' })
+    }
+  })
+  if (!ed) return
+  editors.set(s.id, ed)
+  if (edit.picked.value?.sceneId === s.id) ed.show(edit.picked.value.selector)
+}
+watch(() => edit.picked.value?.selector, sel => { for (const e of editors.values()) e.show(sel ?? null) })
+onBeforeUnmount(() => {
+  for (const [id, e] of editors) { e.detach(); edit.registerFrame(id, null) }
+})
 const box = ref<HTMLElement>()
 const boxWidth = ref(0)
 const frames = new Map<string, HTMLIFrameElement>()
@@ -62,7 +94,7 @@ watch(() => props.layers.map(l => `${l.scene.id}:${l.t}`).join('|'), () => {
 watch(() => props.scenes.map(s => `${s.id}:${s.mtime}`).join(), () => {
   for (const s of props.scenes) {
     const f = frames.get(s.id)
-    if (f && !f.src.endsWith(frameUrl(props.project.id, s, undefined, props.version))) errors.delete(s.id)
+    if (f && !f.src.endsWith(srcFor(s))) errors.delete(s.id)
   }
 })
 
@@ -104,11 +136,13 @@ async function fix() {
       v-for="s in scenes"
       :key="s.id"
       :ref="el => setFrame(s.id, el)"
-      :src="frameUrl(project.id, s, undefined, version)"
-      class="pointer-events-none absolute inset-0 size-full border-0"
+      :src="srcFor(s)"
+      class="absolute inset-0 size-full border-0"
+      :class="editable ? 'pointer-events-auto' : 'pointer-events-none'"
       tabindex="-1"
       :style="styleFor(s.id)"
       :title="s.title"
+      @load="onLoad(s)"
     />
     <div v-if="caption && !activeError" class="pointer-events-none absolute inset-x-[6%] z-10 flex justify-center" :style="captionStyle">
       <span class="rounded-[0.35em] bg-black/70 px-[0.65em] py-[0.3em] text-center leading-snug font-semibold text-white">{{ caption }}</span>

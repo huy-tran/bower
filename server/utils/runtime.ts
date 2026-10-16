@@ -55,9 +55,38 @@ export const SCENE_RUNTIME = String.raw`
 
   var def = null, cur = 0, stage = null;
 
+  var meta = null;
   function readMeta() {
+    if (meta) return meta;
     var el = document.getElementById('meta');
-    try { return el ? JSON.parse(el.textContent) : {}; } catch (e) { return {}; }
+    if (!el) return {};
+    try { meta = JSON.parse(el.textContent); } catch (e) { meta = {}; }
+    return meta;
+  }
+
+  // Settings people change in the editor ("params" in the meta block). The editor can preview new values without
+  // saving: they override the saved ones until the frame reloads.
+  var overrides = {};
+  function paramValue(name) {
+    if (Object.prototype.hasOwnProperty.call(overrides, name)) return overrides[name];
+    var p = (readMeta().params || {})[name];
+    return p && typeof p === 'object' ? p.value : undefined;
+  }
+  // Colour and number params are also CSS variables on the stage (--ve-accent), so styles can use them directly.
+  function applyParamVars() {
+    stage = stage || document.getElementById('stage');
+    if (!stage) return;
+    var ps = readMeta().params || {};
+    Object.keys(ps).forEach(function (name) {
+      var p = ps[name] || {}, v = paramValue(name);
+      if ((p.type === 'color' || p.type === 'number' || typeof v === 'number') && v != null) stage.style.setProperty('--ve-' + name, String(v));
+    });
+    // <div data-ve-param="headline"></div> shows a text param. One the script fills with elements of its own
+    // (a span per letter) is left to the script.
+    Array.prototype.forEach.call(stage.querySelectorAll('[data-ve-param]'), function (el) {
+      var v = paramValue(el.getAttribute('data-ve-param'));
+      if (v != null && !el.children.length && el.textContent !== String(v)) el.textContent = String(v);
+    });
   }
 
   function fit() {
@@ -197,10 +226,14 @@ export const SCENE_RUNTIME = String.raw`
     downbeat: function (n) { return VE.downbeats[n]; },
     snap: function (t, grid) { var l = VE[grid || 'beats']; return l && l.length ? nearest(l, t) : t; },
     get duration() { return readMeta().duration || 3000; },
+    // A scene setting from the meta block's "params", or the fallback when it has none. Read it inside render(t)
+    // so the editor's live preview of a new value shows straight away.
+    param: function (name, fallback) { var v = paramValue(name); return v === undefined ? fallback : v; },
+    get params() { var o = {}; Object.keys(readMeta().params || {}).forEach(function (k) { o[k] = paramValue(k); }); return o; },
     get time() { return cur; },
     $: function (s) { return document.querySelector(s); },
     $$: function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); },
-    scene: function (d) { def = d; fit(); Promise.resolve(VE.seek(cur)).catch(function () {}); },
+    scene: function (d) { def = d; fit(); applyParamVars(); Promise.resolve(VE.seek(cur)).catch(function () {}); },
     // Live UI snapshots: VE.ui('.screen') reaches inside a <ve-ui> (its shadow root). ui.$ / ui.$$ query it,
     // ui.handle('b3') finds a tagged element ([data-ve="b3"]), ui.text('Export') the element showing that text.
     ui: function (sel) {
@@ -263,6 +296,12 @@ export const SCENE_RUNTIME = String.raw`
   window.addEventListener('error', function (e) { report('error', { message: e.message }); });
   window.addEventListener('message', function (e) {
     var d = e.data;
+    if (d && d.__ve && d.type === 'params') {
+      overrides = d.values || {};
+      applyParamVars();
+      Promise.resolve(VE.seek(cur)).catch(function () {});
+      return;
+    }
     if (!d || !d.__ve || d.type !== 'seek') return;
     var done = settled(d.t);
     // The renderer waits for this acknowledgement (after clips, fonts and a paint) before taking a frame. A clip
@@ -275,6 +314,7 @@ export const SCENE_RUNTIME = String.raw`
   window.addEventListener('resize', fit);
   document.addEventListener('DOMContentLoaded', function () {
     fit();
+    applyParamVars();
     var q = new URLSearchParams(location.search).get('t');
     Promise.resolve(VE.seek(q ? parseFloat(q) : cur)).catch(function () {});
     // Ready once live UI snapshots are in, so the renderer's first frame already shows them.

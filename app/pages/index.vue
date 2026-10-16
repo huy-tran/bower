@@ -64,6 +64,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onDrop)
 })
 
+// The right column: chatting with Claude, or editing the scene by hand. Editing works on one scene, paused.
+const sceneEdit = useSceneEdit()
+const sideTabs = [{ label: 'Chat with Claude', value: 'chat', icon: 'i-heroicons-sparkles' }, { label: 'Edit by hand', value: 'edit', icon: 'i-heroicons-pencil-square' }]
+const editing = computed(() => sceneEdit.sideTab.value === 'edit' && mode.value === 'scene')
+watch(sceneEdit.sideTab, (t) => {
+  if (t !== 'edit') return
+  ed.pause()
+  ed.setMode('scene')
+})
+
 const modeTabs = [{ label: 'This scene', value: 'scene' }, { label: 'Whole video', value: 'video' }]
 const modeModel = computed({ get: () => mode.value, set: v => ed.setMode(v as PlayMode) })
 const rateItems = [{ label: '0.25×', value: 0.25 }, { label: '0.5×', value: 0.5 }, { label: '1×', value: 1 }]
@@ -567,8 +577,13 @@ async function copyProjectPath() {
               </div>
             </div>
             <div ref="stageBox" class="flex min-h-0 flex-1 items-center justify-center px-6">
-              <div class="cursor-pointer" :style="{ width: `${stageSize.w}px`, height: `${stageSize.h}px` }" title="Click to play or pause" @click="ed.toggle()">
-                <ScenePlayer v-if="active" :project="project" :scenes="playerScenes" :layers="layers" :caption="caption" rounded fixable />
+              <div
+                :class="!editing && 'cursor-pointer'"
+                :style="{ width: `${stageSize.w}px`, height: `${stageSize.h}px` }"
+                :title="editing ? 'Click to pick an element, double-click text to retype it' : 'Click to play or pause'"
+                @click="!editing && ed.toggle()"
+              >
+                <ScenePlayer v-if="active" :project="project" :scenes="playerScenes" :layers="layers" :caption="caption" rounded fixable :editable="editing" />
               </div>
             </div>
             <div class="flex items-center gap-3 px-6 pt-3 pb-3">
@@ -596,7 +611,13 @@ async function copyProjectPath() {
             </div>
           </section>
 
-          <ChatPanel />
+          <div class="flex min-h-0 flex-col border-l border-default bg-default">
+            <div class="border-b border-default px-4 pt-3 pb-2">
+              <UTabs v-model="sceneEdit.sideTab.value" :items="sideTabs" :content="false" size="sm" color="neutral" class="w-full" />
+            </div>
+            <ChatPanel v-show="sceneEdit.sideTab.value === 'chat'" class="min-h-0 flex-1" />
+            <EditPanel v-if="sceneEdit.sideTab.value === 'edit'" class="min-h-0 flex-1" />
+          </div>
         </div>
         <div class="border-t border-default bg-default">
           <SceneStrip />

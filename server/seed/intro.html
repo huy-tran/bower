@@ -1,8 +1,8 @@
-<script type="application/json" id="meta">{"duration": 2600}</script>
+<script type="application/json" id="meta">{"duration": 2600, "params": {"headline": {"type": "text", "value": "Meet Acme", "label": "Headline"}, "ink": {"type": "color", "value": "#0a0a0a", "label": "Headline colour"}, "lift": {"type": "number", "value": 90, "min": 0, "max": 200, "step": 5, "unit": "px", "label": "Letter rise"}}}</script>
 <style>
   .intro-word {
     position: absolute; left: 0; right: 0; top: 380px; text-align: center;
-    font: 800 220px/1 Inter, sans-serif; letter-spacing: -0.06em; color: #0a0a0a;
+    font: 800 220px/1 Inter, sans-serif; letter-spacing: -0.06em; color: var(--ve-ink, #0a0a0a);
   }
   .intro-word span { display: inline-block; will-change: transform, opacity; }
   .intro-tag {
@@ -10,24 +10,34 @@
     font: 500 40px/1 Inter, sans-serif; letter-spacing: -0.02em; color: #71717a;
   }
 </style>
-<div class="intro-word"></div>
+<div class="intro-word" data-ve-param="headline"></div>
 <div class="intro-tag">A UI kit for calm, careful interfaces</div>
 <script>
   const word = VE.$('.intro-word')
   const tag = VE.$('.intro-tag')
-  const letters = 'Meet Acme'.split('').map(ch => {
-    const s = document.createElement('span')
-    s.textContent = ch === ' ' ? ' ' : ch
-    word.appendChild(s)
-    return s
-  })
+
+  // One span per letter of the headline, rebuilt when the headline setting changes.
+  let built = null, letters = []
+  function build(text) {
+    built = text
+    word.textContent = ''
+    letters = text.split('').map(ch => {
+      const s = document.createElement('span')
+      s.textContent = ch === ' ' ? ' ' : ch
+      word.appendChild(s)
+      return s
+    })
+  }
 
   VE.scene({
     render(t) {
+      const headline = VE.param('headline', 'Meet Acme')
+      if (headline !== built) build(headline)
+      const lift = VE.param('lift', 90)
       letters.forEach((el, i) => {
         const p = VE.progress(t, VE.stagger(i, 45, 100), 700, 'outExpo')
         el.style.opacity = p
-        el.style.transform = 'translateY(' + (1 - p) * 90 + 'px) rotate(' + (1 - p) * 6 + 'deg)'
+        el.style.transform = 'translateY(' + (1 - p) * lift + 'px) rotate(' + (1 - p) * 6 + 'deg)'
       })
       const tp = VE.progress(t, 800, 700, 'outQuint')
       tag.style.opacity = tp

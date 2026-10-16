@@ -52,6 +52,11 @@ const appMode = computed({
   }
 })
 
+// An element picked in the preview (Edit by hand, Ask Claude about this): the next scene message is about it.
+const sceneEdit = useSceneEdit()
+const target = computed(() => tab.value === 'scene' && sceneEdit.queuedTarget.value?.sceneId === selected.value?.id ? sceneEdit.queuedTarget.value : null)
+watch(sceneEdit.queuedTarget, (t) => { if (t) tab.value = 'scene' })
+
 const key = computed(() => tab.value === 'project' ? 'project' : selected.value?.id ?? '')
 const pid = computed(() => project.value?.id ?? '')
 const current = computed(() => pid.value && key.value ? chat.thread(pid.value, key.value) : null)
@@ -100,15 +105,18 @@ async function send(text?: string) {
   const msg = (text ?? draft.value).trim()
   if (!msg || busy.value || !key.value) return
   const files = text ? [] : attachments.value.map(a => a.path)
+  const t = text ? null : target.value
   if (!text) {
     draft.value = ''
     attachments.value = []
+    sceneEdit.queuedTarget.value = null
   }
   try {
     await chat.send(pid.value, key.value, msg, {
       model: model.value === 'default' ? undefined : model.value,
       attachments: files.length ? files : undefined,
-      at: tab.value === 'scene' ? Math.round(sceneTime.value) : undefined
+      at: tab.value === 'scene' ? Math.round(sceneTime.value) : undefined,
+      target: t ? { selector: t.selector, text: t.text || undefined, html: t.html } : undefined
     })
   } catch (e) {
     fail(e, 'Could not start Claude')
@@ -295,7 +303,7 @@ function timeAgo(iso: string) {
 <template>
   <aside
     v-if="project && selected"
-    class="relative flex min-h-0 flex-col border-l border-default bg-default"
+    class="relative flex min-h-0 flex-col bg-default"
     @dragover.prevent="e => e.dataTransfer?.types.includes('Files') && (dragOver = true)"
     @dragleave="e => !(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node) && (dragOver = false)"
     @drop.capture="onDrop"
@@ -411,8 +419,12 @@ function timeAgo(iso: string) {
         @submit="send()"
         @paste="onPaste"
       >
-        <template v-if="attachments.length || uploading" #header>
+        <template v-if="attachments.length || uploading || target" #header>
           <div class="flex flex-wrap items-center gap-2">
+            <UBadge v-if="target" color="primary" variant="subtle" icon="i-heroicons-cursor-arrow-rays" class="max-w-full min-w-0" :title="target.html">
+              <span class="truncate">About {{ target.text ? `“${target.text.slice(0, 40)}”` : `the ${target.tag} element` }}</span>
+              <UButton size="xs" color="primary" variant="link" icon="i-heroicons-x-mark" class="-my-1 -mr-1.5 p-0.5" aria-label="Forget the picked element" @click="sceneEdit.queuedTarget.value = null" />
+            </UBadge>
             <div v-for="(a, i) in attachments" :key="a.path" class="group relative">
               <img :src="a.url" :alt="a.name" class="h-12 w-16 rounded-sm object-cover ring-1 ring-default">
               <UButton class="absolute -top-1.5 -right-1.5" size="xs" color="neutral" variant="solid" icon="i-heroicons-x-mark" :ui="{ base: 'rounded-full p-0.5' }" :aria-label="`Remove ${a.name}`" @click="attachments.splice(i, 1)" />
