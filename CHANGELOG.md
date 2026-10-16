@@ -3,6 +3,38 @@
 What changed in each version of Bower, newest first. Each release's notes on GitHub, and in the update dialog inside
 the app, come from its section here: add a `## x.y.z` section before tagging `vx.y.z` (the release stops without one).
 
+## 0.12.0 (16 October 2026)
+
+### New
+- **Animate by hand, After Effects style**: the Edit by hand tab now has a Layer tab.
+  - **Layers**: pick any element of a scene from the list or by clicking it in the preview.
+  - **Transform box**: drag the picked element to move it, drag a corner to scale it, or use the round handle to
+    rotate it.
+  - **Inspector**: set position, scale, rotation, opacity, blur, colour, background, font size, letter spacing and
+    corner radius. Drag a label left or right to change its value.
+  - **Keyframes**: click the stopwatch on a property to animate it. Changing the value at another moment adds a
+    keyframe there.
+  - **Keyframe timeline**: keyframes show as diamonds under the inspector. Drag them to retime, or click one to pick
+    its easing, including a custom curve you shape yourself.
+  - **Motion path**: when an element moves, its path is drawn in the preview.
+- **Animation presets**: one click adds Fade in, Slide up, From the left or right, Pop, Zoom in, Blur in or
+  Typewriter, or an exit (Fade out, Slide down, Shrink, Blur out), starting at the playhead.
+- **Claude animates with keyframes too**: scenes Claude builds or edits from now on use keyframes for simple motion,
+  so you can retime and adjust them by hand.
+
+### Improved
+- **Hand edits wait for Save**: changes made by hand show in the preview straight away but are only kept when you
+  click Save (Ctrl+S), as one version. Discard throws them away and Undo takes them back one at a time.
+  - Unsaved changes stay when you switch scenes or close Bower, and the scene's thumbnail says Unsaved.
+  - Renders and Claude use the saved scene, so the chat asks you to save or discard first.
+- **The code editor is easier to use**:
+  - A bar jumps to each part of the file, and Show in code opens it at the element you picked.
+  - Typing `VE.` lists the scene helpers.
+  - Format tidies the code.
+  - Long lines wrap.
+  - An error in the preview is marked on its line, with a button to go there.
+  - Apply puts your code into the scene's unsaved changes.
+
 ## 0.11.0 (16 October 2026)
 
 ### New
